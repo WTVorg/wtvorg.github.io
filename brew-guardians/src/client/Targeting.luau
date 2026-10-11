@@ -150,42 +150,51 @@ local function addPanel(instance: Instance)
 		AlwaysOnTop = true,
 		Parent = player:WaitForChild("PlayerGui"),
 	})
+	gui.Size = UDim2.fromOffset(220, 96)
 	UI.text({
 		Text = def.Name,
-		Size = UDim2.new(1, 0, 0, 22),
+		Size = UDim2.new(1, 0, 0, 26),
 		TextColor3 = rarity.Color,
-		TextStrokeTransparency = 0.3,
+		TextStrokeTransparency = 0,
 		Parent = gui,
 	})
 	local barBack = UI.make("Frame", {
-		Position = UDim2.new(0.1, 0, 0, 25),
-		Size = UDim2.new(0.8, 0, 0, 10),
-		BackgroundColor3 = Color3.fromRGB(30, 25, 40),
-		Corner = 5,
+		Position = UDim2.new(0.08, 0, 0, 30),
+		Size = UDim2.new(0.84, 0, 0, 14),
+		BackgroundColor3 = T.PanelDark,
+		Corner = 7,
+		Stroke = T.Outline,
+		StrokeThickness = 2,
 		Parent = gui,
 	})
 	local bar = UI.make("Frame", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundColor3 = Color3.fromRGB(255, 110, 90),
-		Corner = 5,
+		Corner = 7,
 		Parent = barBack,
 	})
 	local status = UI.text({
 		Text = "",
-		Position = UDim2.fromOffset(0, 38),
+		Position = UDim2.fromOffset(0, 48),
 		Size = UDim2.new(1, 0, 0, 18),
 		TextColor3 = T.Text,
-		Font = T.Body,
-		TextStrokeTransparency = 0.4,
+		Parent = gui,
+	})
+	local oddsPill = UI.panel({
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 68),
+		Size = UDim2.fromOffset(180, 26),
+		Color = T.PanelDark,
+		Corner = 13,
+		StrokeThickness = 2,
 		Parent = gui,
 	})
 	local odds = UI.text({
 		Text = "",
-		Position = UDim2.fromOffset(0, 58),
-		Size = UDim2.new(1, 0, 0, 22),
+		Position = UDim2.fromOffset(8, 3),
+		Size = UDim2.new(1, -16, 1, -6),
 		TextColor3 = T.Gold,
-		TextStrokeTransparency = 0.3,
-		Parent = gui,
+		Parent = oddsPill,
 	})
 	panels[model] = { Gui = gui, Bar = bar, Status = status, Odds = odds }
 end

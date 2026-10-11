@@ -2,14 +2,30 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local CaptureFX = require(script.CaptureFX)
 local Hud = require(script.Hud)
 local Menus = require(script.Menus)
 local State = require(script.State)
 local Targeting = require(script.Targeting)
+local UI = require(script.UI)
 
+UI.OnClick = function()
+	Hud.PlaySound("Click")
+end
 Hud.Init()
+
+if Config.Sounds.Music ~= "" then
+	local music = Instance.new("Sound")
+	music.Name = "Music"
+	music.SoundId = Config.Sounds.Music
+	music.Looped = true
+	music.Volume = 0.3
+	music.Parent = workspace
+	music:Play()
+end
+
 Menus.Init()
 CaptureFX.Init()
 Hud.OpenMenu = Menus.Open

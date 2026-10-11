@@ -12,7 +12,10 @@ local Harvest = {}
 local function setVisible(node: Model, visible: boolean)
 	for _, d in node:GetDescendants() do
 		if d:IsA("BasePart") then
-			d.Transparency = if visible then 0 else 1
+			if d:GetAttribute("BaseTransparency") == nil then
+				d:SetAttribute("BaseTransparency", d.Transparency)
+			end
+			d.Transparency = if visible then d:GetAttribute("BaseTransparency") :: number else 1
 		elseif d:IsA("ParticleEmitter") or d:IsA("PointLight") or d:IsA("ProximityPrompt") then
 			d.Enabled = visible
 		end

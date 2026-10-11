@@ -25,7 +25,7 @@ To keep progress while testing in Studio, turn on
 | Step | Where | What happens |
 |---|---|---|
 | Harvest | Glowing plants in the 3 zones | Ingredients, tier 1 to 4 |
-| Brew | Cauldron on your plot | 3 ingredients + 1 vial → a flask. Quality = sum of tiers (+ cauldron bonus): Clay x1, Glass x1.5, Crystal x2.2, Starlight x3.5 |
+| Brew | Cauldron on your plot, or the big public one in the hub | 3 ingredients + 1 vial → a flask. Quality = sum of tiers (+ cauldron bonus): Clay x1, Glass x1.5, Crystal x2.2, Starlight x3.5 |
 | Weaken | In the zone | Dodge red telegraphs (−resistance), lure it into hazards (big −resistance + stun), throw a Weakening Draught (−resistance + slow) |
 | Feed | Action bar → Feed | Its favorite ingredient doubles your odds and calms it. A wrong guess teaches you, and the Journal keeps track |
 | Throw | Select a flask, tap the guardian (or press F) | 3 shakes, then it locks or bursts out. If it bursts out, it's furious: resistance back up, faster attacks |
@@ -52,9 +52,11 @@ src/shared/Config.luau      every number: guardians, ingredients, flasks, zones,
 src/shared/CatchMath.luau   odds + shake timing (shared so client and server agree)
 src/shared/Remotes.luau     RemoteEvents
 src/server/
+  Build.luau                part helpers: ellipsoids, rings, horns, text signs
+  Props.luau                cauldrons, fences, lanterns, trees, gates, stalls, plants
   WorldBuilder.luau         hub, paths, zones, hazards, ingredient nodes, shop stall
   GuardianService.luau      spawning, chase AI, attacks, hazards, resistance
-  GuardianModels.luau       placeholder bodies / your custom models
+  GuardianModels.luau       one hand-built body per species / your custom models
   Actions.luau              throw, feed, brew, fuse, buy, release, Robux receipt
   Plots.luau                plots, display, income, collector
   PlayerData.luau           DataStore save/load with retries + BindToClose
@@ -84,7 +86,18 @@ it to a Developer Product id. Flasks are never sold for Robux. A purchase that
 gives a random chance at a creature counts as a paid random item under Roblox
 rules, which require you to disclose the odds.
 
-## Placeholder content to replace
+## Sounds
 
-- Sounds use built-in `rbxasset://` engine sounds. Swap them in `Config.Sounds`.
-- Guardian bodies, trees, rocks and crystals are simple parts.
+`Config.Sounds` has a slot for every sound (throw, shake, catch, break free,
+brew, harvest, coins, UI click, music). The defaults are the few sounds built
+into the engine. To use better ones: in Studio open **Toolbox → Audio**, find
+a sound, right-click → **Copy Asset ID**, and paste it as
+`"rbxassetid://<id>"`. Each slot's comment suggests a search term. Empty `""`
+means silence.
+
+## Art
+
+Everything is built from parts in code (smooth stretched spheres for bodies),
+so the place works with nothing uploaded. For a front-page look, model the
+guardians in Blender or grab meshes from the Creator Store and drop them in
+`ServerStorage/GuardianModels`; the code uses them automatically.

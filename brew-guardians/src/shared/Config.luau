@@ -43,41 +43,49 @@ Config.IngredientOrder = {
 
 Config.Ingredients = {
 	Sunpetal = {
+		Style = "Flower",
 		Name = "Sunpetal", Tier = 1, Color = Color3.fromRGB(255, 214, 74),
 		Zones = { Meadow = 7 }, Respawn = 20,
 		Description = "A cheerful flower that hums when the sun is out.",
 	},
 	Dewleaf = {
+		Style = "Leaf",
 		Name = "Dewleaf", Tier = 1, Color = Color3.fromRGB(110, 220, 170),
 		Zones = { Meadow = 7, Frost = 3 }, Respawn = 20,
 		Description = "Always wet, even at noon.",
 	},
 	HoneydewRoot = {
+		Style = "Root",
 		Name = "Honeydew Root", Tier = 2, Color = Color3.fromRGB(214, 160, 92),
 		Zones = { Meadow = 4 }, Respawn = 45,
 		Description = "Sweet, knotted and stubborn to pull up.",
 	},
 	EmberPepper = {
+		Style = "Pepper",
 		Name = "Ember Pepper", Tier = 2, Color = Color3.fromRGB(255, 92, 48),
 		Zones = { Caldera = 6 }, Respawn = 35,
 		Description = "Warm to the touch. Do not lick.",
 	},
 	Ashcap = {
+		Style = "Mushroom",
 		Name = "Ashcap", Tier = 3, Color = Color3.fromRGB(120, 110, 120),
 		Zones = { Caldera = 4 }, Respawn = 70,
 		Description = "A mushroom that only grows where something burned.",
 	},
 	Frostcap = {
+		Style = "Mushroom",
 		Name = "Frostcap", Tier = 2, Color = Color3.fromRGB(150, 210, 255),
 		Zones = { Frost = 6, Caldera = 1 }, Respawn = 35,
 		Description = "Leaves a ring of frost wherever it is set down.",
 	},
 	Moonberry = {
+		Style = "Berry",
 		Name = "Moonberry", Tier = 3, Color = Color3.fromRGB(170, 120, 255),
 		Zones = { Frost = 4 }, Respawn = 70,
 		Description = "Glows faintly. Tastes like a cold night.",
 	},
 	StarlightNectar = {
+		Style = "Nectar",
 		Name = "Starlight Nectar", Tier = 4, Color = Color3.fromRGB(255, 250, 210),
 		Zones = { Meadow = 1, Caldera = 1, Frost = 1 }, Respawn = 240,
 		Description = "One drop makes a flask sing. Very rare.",
@@ -237,14 +245,21 @@ Config.ZoneOrder = { "Meadow", "Caldera", "Frost" }
 Config.HazardRadius = 9
 Config.HazardPlayerDamage = 8
 
--- Built-in engine sounds so the place works with zero uploaded assets.
--- Swap these for your own audio ids.
+-- Sound ids. The defaults are the few sounds built into the engine so the
+-- place makes noise with nothing uploaded. Replace them with Creator Store
+-- audio: in Studio open Toolbox > Audio, find a sound you like, right-click >
+-- Copy Asset ID, and paste it here as "rbxassetid://<id>". Leave a slot as
+-- "" for silence.
 Config.Sounds = {
-	Throw = "rbxasset://sounds/swoosh.wav",
-	Shake = "rbxasset://sounds/clickfast.wav",
-	Lock = "rbxasset://sounds/electronicpingshort.wav",
-	Burst = "rbxasset://sounds/collide.wav",
-	Brew = "rbxasset://sounds/button.wav",
+	Throw = "rbxasset://sounds/swoosh.wav", -- flask leaves your hand (try "whoosh")
+	Shake = "rbxasset://sounds/clickfast.wav", -- each wobble (try "glass clink", "wood knock")
+	Lock = "rbxasset://sounds/electronicpingshort.wav", -- caught! (try "success chime", "magic sparkle")
+	Burst = "rbxasset://sounds/collide.wav", -- broke free (try "glass break", "pop")
+	Brew = "rbxasset://sounds/button.wav", -- potion finished (try "bubble", "potion")
+	Harvest = "", -- picking an ingredient (try "pluck", "pop")
+	Coins = "", -- collecting / buying (try "coins", "cash register")
+	Click = "", -- UI buttons (try "ui click")
+	Music = "", -- looping background music (try "fantasy", "cozy")
 }
 
 ----------------------------------------------------------------------

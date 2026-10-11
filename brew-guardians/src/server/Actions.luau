@@ -270,8 +270,9 @@ local function onBrew(player: Player, mode: any, list: any)
 	if mode ~= "Flask" and mode ~= "Draught" then
 		return
 	end
-	if not Plots.NearOwnPot(player, POT_RANGE) then
-		notify(player, "Stand next to your cauldron to brew.", "error")
+	local brew = Plots.NearbyBrew(player, POT_RANGE)
+	if not brew then
+		notify(player, "Stand next to a cauldron to brew.", "error")
 		return
 	end
 	local count = if mode == "Flask" then Config.FlaskIngredientCount else Config.DraughtIngredientCount
@@ -295,7 +296,7 @@ local function onBrew(player: Player, mode: any, list: any)
 		d.Stats.Brews += 1
 		return true
 	end)
-	Plots.BrewEffect(player, result.Color)
+	Plots.BrewEffect(brew, result.Color)
 	notify(player, string.format("Brewed a %s! (quality %d)", result.Name, quality), "brew")
 end
 
@@ -304,8 +305,9 @@ local function onFuse(player: Player, uid: any, list: any)
 	if not data then
 		return
 	end
-	if not Plots.NearOwnPot(player, POT_RANGE) then
-		notify(player, "Stand next to your cauldron to fuse.", "error")
+	local brew = Plots.NearbyBrew(player, POT_RANGE)
+	if not brew then
+		notify(player, "Stand next to a cauldron to fuse.", "error")
 		return
 	end
 	local entry = findGuardianEntry(data, uid)
@@ -334,7 +336,7 @@ local function onFuse(player: Player, uid: any, list: any)
 		return true
 	end)
 	Plots.Refresh(player)
-	Plots.BrewEffect(player, Color3.fromRGB(255, 80, 200))
+	Plots.BrewEffect(brew, Color3.fromRGB(255, 80, 200))
 	notify(player, string.format("It grew into a %s!", Config.GuardianDisplayName(entry)), "catch")
 end
 
@@ -460,6 +462,13 @@ function Actions.Start()
 	Remotes.Release.OnServerEvent:Connect(onRelease)
 	Remotes.BuyLuck.OnServerEvent:Connect(onBuyLuck)
 	MarketplaceService.ProcessReceipt = processReceipt
+
+	local publicPrompt = WorldBuilder.PublicBrewPrompt
+	if publicPrompt then
+		publicPrompt.Triggered:Connect(function(player)
+			Remotes.OpenUI:FireClient(player, "Brew")
+		end)
+	end
 
 	local shopPrompt = WorldBuilder.ShopPrompt
 	if shopPrompt then

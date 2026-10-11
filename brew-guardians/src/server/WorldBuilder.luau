@@ -4,6 +4,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Build = require(script.Parent.Build)
+local Props = require(script.Parent.Props)
 
 local WorldBuilder = {}
 
@@ -11,9 +13,17 @@ WorldBuilder.Hazards = {} :: { { Position: Vector3, Radius: number, Zone: string
 WorldBuilder.IngredientNodes = {} :: { Model }
 WorldBuilder.Folder = nil :: Folder?
 WorldBuilder.ShopPrompt = nil :: ProximityPrompt?
+WorldBuilder.PublicBrew = nil :: BasePart? -- the big hub cauldron anyone can brew at
+WorldBuilder.PublicBrewPrompt = nil :: ProximityPrompt?
 
 local rng = Random.new(20261011)
 
+local GRASS = Color3.fromRGB(116, 178, 92)
+local COBBLE = Color3.fromRGB(196, 186, 168)
+local COBBLE_DARK = Color3.fromRGB(160, 150, 136)
+local PATH = Color3.fromRGB(205, 180, 135)
+
+-- Generic part helper kept for the telegraph effects in GuardianService.
 -- props.ClassName picks the class (defaults to Part).
 local function part(props): Part
 	local p = Instance.new(props.ClassName or "Part") :: Part
@@ -27,9 +37,9 @@ local function part(props): Part
 	end
 	return p
 end
-
 WorldBuilder.Part = part
 
+-- Flat disc centred on `center` (cylinder lying on its side).
 local function disc(name, center: Vector3, radius: number, height: number, color: Color3, material, parent)
 	return part({
 		Name = name,
@@ -41,42 +51,33 @@ local function disc(name, center: Vector3, radius: number, height: number, color
 		Parent = parent,
 	})
 end
-
 WorldBuilder.Disc = disc
 
-local function sign(parent: Instance, position: Vector3, text: string, color: Color3)
-	local post = part({
-		Name = "Sign",
-		Size = Vector3.new(1, 8, 1),
-		CFrame = CFrame.new(position + Vector3.new(0, 4, 0)),
-		Color = Color3.fromRGB(110, 80, 50),
-		Material = Enum.Material.Wood,
-		Parent = parent,
-	})
-	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(260, 60)
-	gui.StudsOffset = Vector3.new(0, 6, 0)
-	gui.MaxDistance = 250
-	gui.AlwaysOnTop = false
-	gui.Parent = post
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.FredokaOne
-	label.TextScaled = true
-	label.Text = text
-	label.TextColor3 = color
-	label.TextStrokeTransparency = 0.2
-	label.Parent = gui
-	return post
+local function prompt(parent: Instance, action: string, object: string, distance: number?): ProximityPrompt
+	local p = Instance.new("ProximityPrompt")
+	p.ActionText = action
+	p.ObjectText = object
+	p.MaxActivationDistance = distance or 12
+	p.RequiresLineOfSight = false
+	p.Parent = parent
+	return p
+end
+WorldBuilder.Prompt = prompt
+
+local function polar(angleDeg: number, radius: number): Vector3
+	local a = math.rad(angleDeg)
+	return Vector3.new(math.cos(a) * radius, 0, math.sin(a) * radius)
 end
 
-WorldBuilder.Sign = sign
+-- Ground frame at `pos` facing toward `lookAt` (front = -Z).
+local function facing(pos: Vector3, lookAt: Vector3): CFrame
+	return CFrame.lookAt(pos, Vector3.new(lookAt.X, pos.Y, lookAt.Z))
+end
 
--- Random point in a zone that keeps clear of the given points.
+-- Random point in a disc that keeps clear of the given points.
 local function scatter(center: Vector3, radius: number, avoid: { Vector3 }, minGap: number): Vector3
 	local best = center
-	for _ = 1, 40 do
+	for _ = 1, 50 do
 		local a = rng:NextNumber(0, math.pi * 2)
 		local r = math.sqrt(rng:NextNumber()) * radius
 		local candidate = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
@@ -95,84 +96,64 @@ local function scatter(center: Vector3, radius: number, avoid: { Vector3 }, minG
 	return best
 end
 
-local function buildDecor(kind: string, position: Vector3, parent: Instance)
-	local model = Instance.new("Model")
-	model.Name = kind
-	if kind == "Tree" then
-		local h = rng:NextNumber(10, 18)
-		part({
-			Size = Vector3.new(2.5, h, 2.5),
-			CFrame = CFrame.new(position + Vector3.new(0, h / 2, 0)),
-			Color = Color3.fromRGB(105, 75, 50),
-			Material = Enum.Material.Wood,
-			Parent = model,
-		})
-		part({
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.one * rng:NextNumber(9, 13),
-			CFrame = CFrame.new(position + Vector3.new(0, h + 2, 0)),
-			Color = Color3.fromRGB(70, 150, 70),
-			Material = Enum.Material.Grass,
-			Parent = model,
-		})
-	elseif kind == "Rock" then
-		local s = rng:NextNumber(5, 12)
-		part({
-			Size = Vector3.new(s, s * 0.8, s * 1.1),
-			CFrame = CFrame.new(position + Vector3.new(0, s * 0.3, 0))
-				* CFrame.Angles(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0, 6), rng:NextNumber(-0.3, 0.3)),
-			Color = Color3.fromRGB(55, 45, 45),
-			Material = Enum.Material.Basalt,
-			Parent = model,
-		})
-	else
-		local h = rng:NextNumber(6, 14)
-		part({
-			Size = Vector3.new(2.5, h, 2.5),
-			CFrame = CFrame.new(position + Vector3.new(0, h / 2 - 0.5, 0))
-				* CFrame.Angles(rng:NextNumber(-0.35, 0.35), rng:NextNumber(0, 6), rng:NextNumber(-0.35, 0.35)),
-			Color = Color3.fromRGB(170, 220, 255),
-			Material = Enum.Material.Glass,
-			Transparency = 0.25,
-			Parent = model,
-		})
-	end
-	model.Parent = parent
-	return model
-end
+----------------------------------------------------------------------
+-- Zones
+----------------------------------------------------------------------
+local ZONE_STYLE = {
+	Meadow = { Floor = Enum.Material.Grass, Tree = "Round", Tree2 = "Pine", Rock = Color3.fromRGB(150, 150, 140), Accent = Color3.fromRGB(140, 230, 110) },
+	Caldera = { Floor = Enum.Material.Slate, Tree = "Dead", Tree2 = "Dead", Rock = Color3.fromRGB(60, 48, 46), Accent = Color3.fromRGB(255, 120, 40) },
+	Frost = { Floor = Enum.Material.Snow, Tree = "SnowPine", Tree2 = "SnowPine", Rock = Color3.fromRGB(190, 210, 225), Accent = Color3.fromRGB(150, 210, 255) },
+}
 
 local function buildHazard(zoneId: string, zone, position: Vector3, parent: Instance)
 	local r = Config.HazardRadius
-	local base = disc(zone.HazardName, position + Vector3.new(0, 0.15, 0), r, 0.4, zone.HazardColor, nil, parent)
-	base.CanCollide = false
-	base:SetAttribute("Hazard", true)
-	base:SetAttribute("Zone", zoneId)
+	local m = Build.model(zone.HazardName, parent)
+	local ground = CFrame.new(position)
+	local base: BasePart
 
 	if zoneId == "Caldera" then
-		base.Material = Enum.Material.Neon
+		base = Build.cylinder(m, ground * CFrame.new(0, 0.25, 0), 0.3, r * 1.6, Color3.fromRGB(255, 110, 30), Enum.Material.Neon, { CanCollide = false })
+		Build.cylinder(m, ground * CFrame.new(0, 0.32, 0), 0.3, r * 0.9, Color3.fromRGB(255, 210, 90), Enum.Material.Neon, { CanCollide = false })
+		for i = 1, 10 do
+			local a = i / 10 * math.pi * 2
+			Props.Rocks(m, ground * CFrame.new(math.cos(a) * r * 0.95, 0, math.sin(a) * r * 0.95), rng:NextNumber(2.4, 3.6), Color3.fromRGB(45, 36, 34), Enum.Material.Basalt)
+		end
 		local fire = Instance.new("Fire")
-		fire.Size = 8
-		fire.Heat = 12
+		fire.Size = 10
+		fire.Heat = 14
 		fire.Parent = base
+		local smoke = Instance.new("Smoke")
+		smoke.Color = Color3.fromRGB(70, 60, 60)
+		smoke.Opacity = 0.15
+		smoke.RiseVelocity = 6
+		smoke.Size = 6
+		smoke.Parent = base
+		Build.light(base, Color3.fromRGB(255, 120, 40), 22, 2)
+	elseif zoneId == "Frost" then
+		base = Build.cylinder(m, ground * CFrame.new(0, 0.22, 0), 0.25, r * 2, Color3.fromRGB(175, 225, 255), Enum.Material.Ice, { CanCollide = false })
+		for i = 1, 6 do
+			local a = i / 6 * math.pi * 2
+			local d = if i == 1 then 0 else r * 0.55
+			Props.Crystals(m, ground * CFrame.new(math.cos(a) * d, 0, math.sin(a) * d), rng:NextNumber(3, 4.5), Color3.fromRGB(170, 225, 255), false)
+		end
 	else
-		for i = 1, 7 do
-			local a = (i / 7) * math.pi * 2
-			local d = rng:NextNumber(1, r - 1.5)
-			local spikePos = position + Vector3.new(math.cos(a) * d, 1.5, math.sin(a) * d)
-			local spike = part({
-				Name = "Spike",
-				ClassName = "WedgePart",
-				Size = Vector3.new(1.2, 3, 1.2),
-				CFrame = CFrame.new(spikePos) * CFrame.Angles(0, a, 0),
-				Color = zone.HazardColor,
-				Material = if zoneId == "Frost" then Enum.Material.Ice else Enum.Material.Grass,
-				CanCollide = false,
-				Parent = base,
-			})
-			spike.CastShadow = false
+		base = Build.cylinder(m, ground * CFrame.new(0, 0.22, 0), 0.25, r * 2, Color3.fromRGB(70, 90, 45), Enum.Material.Grass, { CanCollide = false })
+		for i = 1, 6 do
+			local a = i / 6 * math.pi * 2 + rng:NextNumber(0, 0.5)
+			local d = if i == 1 then 0 else r * rng:NextNumber(0.4, 0.7)
+			local s = rng:NextNumber(3.5, 5.5)
+			local bush = CFrame.new(position + Vector3.new(math.cos(a) * d, 0, math.sin(a) * d))
+			Build.ellipsoid(m, bush * CFrame.new(0, s * 0.35, 0), Vector3.new(s, s * 0.7, s), Color3.fromRGB(46, 74, 40), Enum.Material.Grass, { CanCollide = false })
+			for k = 1, 5 do
+				local ta = k / 5 * math.pi * 2
+				Build.spike(m, bush * CFrame.new(math.cos(ta) * s * 0.4, s * 0.35, math.sin(ta) * s * 0.4) * CFrame.Angles(math.sin(ta) * 1.2, 0, -math.cos(ta) * 1.2), 1.4, 0.4, Color3.fromRGB(150, 40, 50), nil, { CanCollide = false })
+			end
 		end
 	end
 
+	base.Name = "HazardBase"
+	base:SetAttribute("Hazard", true)
+	base:SetAttribute("Zone", zoneId)
 	table.insert(WorldBuilder.Hazards, {
 		Position = position,
 		Radius = r,
@@ -184,96 +165,57 @@ end
 
 local function buildIngredientNode(ingredientId: string, position: Vector3, parent: Instance)
 	local def = Config.Ingredients[ingredientId]
-	local model = Instance.new("Model")
-	model.Name = "Node_" .. ingredientId
-	model:SetAttribute("IngredientId", ingredientId)
-
-	local stem = part({
-		Name = "Stem",
-		Size = Vector3.new(0.4, 2.2, 0.4),
-		CFrame = CFrame.new(position + Vector3.new(0, 1.1, 0)),
-		Color = Color3.fromRGB(70, 130, 60),
-		CanCollide = false,
-		Parent = model,
-	})
-	local bloom = part({
-		Name = "Bloom",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * (1.4 + def.Tier * 0.35),
-		CFrame = CFrame.new(position + Vector3.new(0, 2.6, 0)),
-		Color = def.Color,
-		Material = if def.Tier >= 3 then Enum.Material.Neon else Enum.Material.SmoothPlastic,
-		CanCollide = false,
-		Parent = model,
-	})
-	model.PrimaryPart = stem
-
-	local light = Instance.new("PointLight")
-	light.Color = def.Color
-	light.Range = 6 + def.Tier * 2
-	light.Brightness = 0.8
-	light.Parent = bloom
-
-	local sparkle = Instance.new("ParticleEmitter")
-	sparkle.Name = "Sparkle"
-	sparkle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	sparkle.Color = ColorSequence.new(def.Color)
-	sparkle.Size = NumberSequence.new(0.3, 0)
-	sparkle.Lifetime = NumberRange.new(0.6, 1.2)
-	sparkle.Rate = def.Tier * 2
-	sparkle.Speed = NumberRange.new(1, 2)
-	sparkle.SpreadAngle = Vector2.new(180, 180)
-	sparkle.Parent = bloom
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "HarvestPrompt"
-	prompt.ActionText = "Harvest"
-	prompt.ObjectText = def.Name
-	prompt.HoldDuration = 0.3 + def.Tier * 0.25
-	prompt.MaxActivationDistance = 10
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = bloom
-
-	model.Parent = parent
-	table.insert(WorldBuilder.IngredientNodes, model)
+	local m, focus = Props.Plant(parent, CFrame.new(position) * CFrame.Angles(0, rng:NextNumber(0, 6), 0), def.Style or "Flower", def.Color, def.Tier)
+	m:ScaleTo(1.6)
+	Build.sitOnGround(m, position.Y)
+	m.Name = "Node_" .. ingredientId
+	m:SetAttribute("IngredientId", ingredientId)
+	local p = prompt(focus, "Harvest", def.Name, 10)
+	p.Name = "HarvestPrompt"
+	p.HoldDuration = 0.3 + def.Tier * 0.25
+	table.insert(WorldBuilder.IngredientNodes, m)
 end
 
 local function buildZone(zoneId: string, folder: Folder)
 	local zone = Config.Zones[zoneId]
+	local style = ZONE_STYLE[zoneId]
 	local center = Config.ZoneCenter(zoneId)
 	local zoneFolder = Instance.new("Folder")
 	zoneFolder.Name = zoneId
 	zoneFolder.Parent = folder
 
-	local floorMaterial = if zoneId == "Frost"
-		then Enum.Material.Snow
-		elseif zoneId == "Caldera" then Enum.Material.Slate
-		else Enum.Material.Grass
-	disc("Floor", center + Vector3.new(0, 0.05, 0), zone.Radius + 10, 0.3, zone.Floor, floorMaterial, zoneFolder)
-
 	local inward = (Vector3.zero - center).Unit
-	local side = Vector3.new(-inward.Z, 0, inward.X)
-	sign(zoneFolder, center + inward * (zone.Radius + 4) + side * 14, zone.Name, Color3.fromRGB(255, 255, 255))
+	Build.cylinder(zoneFolder, CFrame.new(center + Vector3.new(0, 0.1, 0)), 0.3, (zone.Radius + 12) * 2, zone.Floor, style.Floor)
+	Build.cylinder(zoneFolder, CFrame.new(center + Vector3.new(0, 0.05, 0)), 0.3, (zone.Radius + 18) * 2, zone.Floor:Lerp(GRASS, 0.5), style.Floor)
 
-	-- Decor ring around the edge so the zone reads as a place.
-	for i = 1, 26 do
-		local a = (i / 26) * math.pi * 2 + rng:NextNumber(-0.1, 0.1)
-		local r = zone.Radius + rng:NextNumber(2, 14)
-		local pos = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
-		-- leave a gap where the path comes in
-		local toHub = (Vector3.zero - center).Unit
-		local dir = (pos - center).Unit
-		if dir:Dot(toHub) < 0.93 then
-			buildDecor(zone.DecorKind, pos, zoneFolder)
+	-- Gate where the path arrives
+	local gatePos = center + inward * (zone.Radius + 10)
+	Props.Gate(zoneFolder, facing(gatePos + Vector3.new(0, 0.2, 0), Vector3.zero), 20, zone.Name, style.Accent)
+
+	-- Dense border so the zone reads as a place
+	for i = 1, 80 do
+		local a = (i / 80) * math.pi * 2 + rng:NextNumber(-0.04, 0.04)
+		local dir = Vector3.new(math.cos(a), 0, math.sin(a))
+		if dir:Dot(inward) < 0.95 then
+			local pos = center + dir * (zone.Radius + (if i % 2 == 0 then rng:NextNumber(2, 9) else rng:NextNumber(11, 22)))
+			local ground = CFrame.new(pos) * CFrame.Angles(0, rng:NextNumber(0, 6), 0)
+			local roll = rng:NextNumber()
+			if roll < 0.55 then
+				Props.Tree(zoneFolder, ground, if roll < 0.3 then style.Tree else style.Tree2)
+			elseif zoneId == "Frost" and roll < 0.8 then
+				Props.Crystals(zoneFolder, ground, rng:NextNumber(4, 7), Color3.fromRGB(170, 220, 255), rng:NextNumber() < 0.3)
+			else
+				Props.Rocks(zoneFolder, ground, rng:NextNumber(4, 8), style.Rock)
+			end
 		end
 	end
 
-	local taken = {}
+	local taken = { gatePos }
 	local hazardFolder = Instance.new("Folder")
 	hazardFolder.Name = "Hazards"
 	hazardFolder.Parent = zoneFolder
 	for _ = 1, zone.Hazards do
-		local pos = scatter(center, zone.Radius - 15, taken, 30)
+		local pos = scatter(center, zone.Radius - 16, taken, 30)
 		table.insert(taken, pos)
 		buildHazard(zoneId, zone, pos, hazardFolder)
 	end
@@ -289,96 +231,150 @@ local function buildZone(zoneId: string, folder: Folder)
 			buildIngredientNode(ingredientId, pos, nodeFolder)
 		end
 	end
+
+	-- Floor colour variation
+	for _ = 1, 14 do
+		local pos = scatter(center, zone.Radius - 10, {}, 0)
+		local sz = rng:NextNumber(18, 40)
+		Build.ellipsoid(zoneFolder, CFrame.new(pos + Vector3.new(0, 0.26, 0)) * CFrame.Angles(0, rng:NextNumber(0, 6), 0), Vector3.new(sz, 0.08, sz * 0.7), zone.Floor:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0.05, 0.15)), style.Floor, { CanCollide = false })
+	end
+
+	-- Inner scenery, kept clear of hazards, plants and each other
+	local decor = Instance.new("Folder")
+	decor.Name = "Decor"
+	decor.Parent = zoneFolder
+	for i = 1, 28 do
+		local pos = scatter(center, zone.Radius - 8, taken, 15)
+		table.insert(taken, pos)
+		local ground = CFrame.new(pos) * CFrame.Angles(0, rng:NextNumber(0, 6), 0)
+		local roll = i % 4
+		if zoneId == "Meadow" then
+			if roll == 0 then
+				Props.Tree(decor, ground, "Round")
+			elseif roll == 1 then
+				Props.FlowerPatch(decor, ground, 5)
+			elseif roll == 2 then
+				Props.Rocks(decor, ground, rng:NextNumber(2.5, 4.5), style.Rock)
+			else
+				-- fallen log with mushrooms
+				Build.cylinder(decor, ground * CFrame.new(0, 1, 0) * CFrame.Angles(math.rad(90), 0, 0), 9, 2, Color3.fromRGB(110, 78, 52), Enum.Material.Wood)
+				Build.ellipsoid(decor, ground * CFrame.new(0.9, 2, 2), Vector3.new(1.4, 0.6, 1.4), Color3.fromRGB(220, 70, 60))
+			end
+		elseif zoneId == "Caldera" then
+			if roll == 0 then
+				-- tapering basalt spire with a glowing seam
+				local h = rng:NextNumber(5, 9)
+				local tilt = CFrame.Angles(rng:NextNumber(-0.15, 0.15), rng:NextNumber(0, 6), rng:NextNumber(-0.15, 0.15))
+				for k = 0, 2 do
+					local w = 5 - k * 1.4
+					Build.part(decor, ground * tilt * CFrame.new(0, h * k * 0.8 + h * 0.45, 0) * CFrame.Angles(0, k * 0.5, 0), Vector3.new(w, h, w), Color3.fromRGB(48, 40, 40), Enum.Material.Basalt)
+				end
+				Build.part(decor, ground * tilt * CFrame.new(0, h * 0.9, 0), Vector3.new(5.2, 0.3, 5.2), Color3.fromRGB(255, 110, 30), Enum.Material.Neon)
+			elseif roll == 1 then
+				-- glowing crack in the ground
+				Build.part(decor, ground * CFrame.new(0, 0.28, 0), Vector3.new(1, 0.1, rng:NextNumber(12, 22)), Color3.fromRGB(255, 120, 40), Enum.Material.Neon, { CanCollide = false })
+			elseif roll == 2 then
+				Props.Tree(decor, ground, "Dead")
+			else
+				Props.Rocks(decor, ground, rng:NextNumber(3, 6), style.Rock, Enum.Material.Basalt)
+			end
+		else
+			if roll == 0 then
+				Props.Tree(decor, ground, "SnowPine")
+			elseif roll == 1 then
+				Build.ellipsoid(decor, ground * CFrame.new(0, 0.6, 0), Vector3.new(rng:NextNumber(8, 14), 2.4, rng:NextNumber(6, 10)), Color3.fromRGB(245, 250, 255), Enum.Material.Snow, { CanCollide = false })
+			elseif roll == 2 then
+				Props.Crystals(decor, ground, rng:NextNumber(2.5, 4), Color3.fromRGB(190, 230, 255), true)
+			else
+				Build.cylinder(decor, ground * CFrame.new(0, 0.3, 0), 0.1, rng:NextNumber(10, 16), Color3.fromRGB(160, 215, 245), Enum.Material.Ice, { CanCollide = false })
+			end
+		end
+	end
 end
 
-local function buildPath(fromRadius: number, angleDeg: number, toDistance: number, folder: Folder)
-	local a = math.rad(angleDeg)
-	local dir = Vector3.new(math.cos(a), 0, math.sin(a))
-	local length = toDistance - fromRadius
-	local mid = dir * (fromRadius + length / 2)
-	part({
-		Name = "Path",
-		Size = Vector3.new(18, 0.3, length + 4),
-		CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.1, 0), mid + dir + Vector3.new(0, 0.1, 0)),
-		Color = Color3.fromRGB(200, 180, 140),
-		Material = Enum.Material.Pebble,
-		Parent = folder,
-	})
+----------------------------------------------------------------------
+-- Paths
+----------------------------------------------------------------------
+local function buildPath(from: Vector3, to: Vector3, width: number, folder: Instance)
+	local dir = (to - from)
+	local length = dir.Magnitude
+	local mid = (from + to) / 2
+	local cf = CFrame.lookAt(mid, mid + dir.Unit)
+	Build.part(folder, cf * CFrame.new(0, 0.12, 0), Vector3.new(width, 0.25, length), PATH, Enum.Material.Pebble)
+	-- edge stones
+	local count = math.floor(length / 7)
+	for i = 0, count do
+		for _, side in { -1, 1 } do
+			local z = -length / 2 + (i / math.max(count, 1)) * length
+			Build.part(folder, cf * CFrame.new(side * (width / 2 + 0.5), 0.35, z) * CFrame.Angles(0, rng:NextNumber(-0.3, 0.3), 0), Vector3.new(1.4, 0.7, 2.2), COBBLE_DARK, Enum.Material.Slate)
+		end
+	end
 end
 
+----------------------------------------------------------------------
+-- Hub
+----------------------------------------------------------------------
 local function buildHub(folder: Folder)
 	local hub = Instance.new("Folder")
 	hub.Name = "Hub"
 	hub.Parent = folder
+	local R = Config.HubRadius
 
-	disc("HubFloor", Vector3.new(0, 0.1, 0), Config.HubRadius, 0.4, Color3.fromRGB(220, 205, 175), Enum.Material.Cobblestone, hub)
+	-- Plaza rings
+	Build.cylinder(hub, CFrame.new(0, 0.15, 0), 0.3, R * 2, COBBLE, Enum.Material.Cobblestone)
+	Build.ring(hub, CFrame.new(0, 0.3, 0), R - 1, 1.2, 64, COBBLE_DARK, Enum.Material.Slate)
+	Build.cylinder(hub, CFrame.new(0, 0.2, 0), 0.3, 64, COBBLE_DARK, Enum.Material.Cobblestone)
+	Build.ring(hub, CFrame.new(0, 0.35, 0), 32, 0.8, 48, Color3.fromRGB(150, 110, 230), Enum.Material.Neon)
 
+	for i = 0, 7 do
+		local a = i * 45
+		local mid = polar(a, (R + 32) / 2)
+		Build.part(hub, CFrame.lookAt(mid + Vector3.new(0, 0.32, 0), Vector3.new(0, 0.32, 0)), Vector3.new(6, 0.05, R - 32), COBBLE_DARK, Enum.Material.Slate)
+		-- planter with a tree between the stripes
+		local planter = polar(a + 22.5, 70)
+		Build.cylinder(hub, CFrame.new(planter + Vector3.new(0, 0.8, 0)), 1.6, 8, COBBLE_DARK, Enum.Material.Slate)
+		Props.Tree(hub, CFrame.new(planter + Vector3.new(0, 1.6, 0)), "Round")
+	end
+
+	-- Dais with the giant public cauldron
+	for i, rad in { 22, 17, 12.5 } do
+		Build.cylinder(hub, CFrame.new(0, 0.3 + i * 0.9 - 0.45, 0), 0.9, rad * 2, if i % 2 == 0 then COBBLE else COBBLE_DARK, Enum.Material.Slate)
+	end
+	local _, brew, belly = Props.Cauldron(hub, CFrame.new(0, 2.95, 0), 6, Color3.fromRGB(170, 110, 255))
+	WorldBuilder.PublicBrew = brew
+	WorldBuilder.PublicBrewPrompt = prompt(belly, "Brew", "Public Cauldron", 16)
+
+	-- Lanterns, benches and flower beds around the plaza
+	for i = 0, 7 do
+		local a = i * 45 + 22.5
+		Props.Lantern(hub, facing(polar(a, R - 8), Vector3.zero) * CFrame.Angles(0, math.pi, 0), 10)
+		if i % 2 == 0 then
+			Props.Bench(hub, facing(polar(a + 22.5, 42), Vector3.zero))
+		else
+			local bed = polar(a + 22.5, 44)
+			Build.cylinder(hub, CFrame.new(bed + Vector3.new(0, 0.6, 0)), 1.2, 9, COBBLE_DARK, Enum.Material.Slate)
+			Build.cylinder(hub, CFrame.new(bed + Vector3.new(0, 1.0, 0)), 0.6, 8, Color3.fromRGB(90, 62, 44), Enum.Material.Ground)
+			Props.FlowerPatch(hub, CFrame.new(bed + Vector3.new(0, 1.3, 0)), 3)
+		end
+	end
+
+	-- Shop stall, clear of the zone paths
+	local stallPos = polar(210, 62) + Vector3.new(0, 0.3, 0)
+	local _, counter = Props.Stall(hub, facing(stallPos, Vector3.zero), Color3.fromRGB(230, 80, 100), Color3.fromRGB(255, 240, 230))
+	WorldBuilder.ShopPrompt = prompt(counter, "Shop", "Vials & Cauldrons", 12)
+	Props.SignBoard(hub, facing(stallPos, Vector3.zero) * CFrame.new(11, 0, -2), "SHOP", 8, Color3.fromRGB(150, 60, 80))
+
+	-- Spawn
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
-	spawn.Size = Vector3.new(10, 1, 10)
-	spawn.CFrame = CFrame.new(0, 0.5, 20)
-	spawn.Color = Color3.fromRGB(180, 140, 255)
+	spawn.Size = Vector3.new(8, 0.4, 8)
+	spawn.CFrame = CFrame.new(0, 0.5, 40)
+	spawn.Color = Color3.fromRGB(170, 130, 255)
 	spawn.Material = Enum.Material.Neon
-	spawn.Transparency = 0.4
+	spawn.Transparency = 0.5
 	spawn.Duration = 0
+	spawn.TopSurface = Enum.SurfaceType.Smooth
 	spawn.Parent = hub
-
-	-- Giant decorative cauldron in the middle.
-	disc("Cauldron", Vector3.new(0, 4, 0), 9, 8, Color3.fromRGB(40, 40, 50), Enum.Material.Metal, hub)
-	local brew = disc("Brew", Vector3.new(0, 8.1, 0), 8, 0.3, Color3.fromRGB(150, 90, 255), Enum.Material.Neon, hub)
-	local bubbles = Instance.new("ParticleEmitter")
-	bubbles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	bubbles.Color = ColorSequence.new(Color3.fromRGB(200, 150, 255))
-	bubbles.Rate = 15
-	bubbles.Lifetime = NumberRange.new(1, 2)
-	bubbles.Speed = NumberRange.new(3, 6)
-	bubbles.Size = NumberSequence.new(0.8, 0)
-	bubbles.EmitterDirection = Enum.NormalId.Right
-	bubbles.Parent = brew
-
-	-- Shop stall
-	local stall = Instance.new("Model")
-	stall.Name = "ShopStall"
-	local counter = part({
-		Name = "Counter",
-		Size = Vector3.new(14, 4, 4),
-		CFrame = CFrame.new(0, 2, -40),
-		Color = Color3.fromRGB(150, 100, 60),
-		Material = Enum.Material.WoodPlanks,
-		Parent = stall,
-	})
-	part({
-		Name = "Awning",
-		Size = Vector3.new(16, 0.6, 8),
-		CFrame = CFrame.new(0, 10, -41) * CFrame.Angles(math.rad(-12), 0, 0),
-		Color = Color3.fromRGB(200, 70, 90),
-		Parent = stall,
-	})
-	for _, x in { -7, 7 } do
-		part({
-			Size = Vector3.new(0.8, 10, 0.8),
-			CFrame = CFrame.new(x, 5, -42),
-			Color = Color3.fromRGB(110, 80, 50),
-			Material = Enum.Material.Wood,
-			Parent = stall,
-		})
-	end
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Shop"
-	prompt.ObjectText = "Vials & Cauldrons"
-	prompt.MaxActivationDistance = 12
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = counter
-	stall.Parent = hub
-	WorldBuilder.ShopPrompt = prompt
-	sign(hub, Vector3.new(10, 0, -38), "Shop", Color3.fromRGB(255, 220, 120))
-
-	for _, zoneId in Config.ZoneOrder do
-		local zone = Config.Zones[zoneId]
-		local a = math.rad(zone.Angle)
-		local pos = Vector3.new(math.cos(a), 0, math.sin(a)) * (Config.HubRadius - 6)
-		sign(hub, pos + Vector3.new(math.sin(a), 0, -math.cos(a)) * 12, "→ " .. zone.Name, Color3.fromRGB(255, 255, 255))
-	end
 end
 
 function WorldBuilder.Build()
@@ -387,21 +383,45 @@ function WorldBuilder.Build()
 	folder.Parent = workspace
 	WorldBuilder.Folder = folder
 
-	local ground = part({
-		Name = "Ground",
-		Size = Vector3.new(2048, 4, 2048),
-		CFrame = CFrame.new(0, -2, 0),
-		Color = Color3.fromRGB(120, 175, 95),
-		Material = Enum.Material.Grass,
-		Parent = folder,
-	})
+	local ground = Build.part(folder, CFrame.new(0, -2, 0), Vector3.new(2048, 4, 2048), GRASS, Enum.Material.Grass)
+	ground.Name = "Ground"
 	ground.Locked = true
 
+	-- Soft colour patches and tufts so the grass isn't one flat colour
+	for _ = 1, 40 do
+		local p = Vector3.new(rng:NextNumber(-650, 650), 0.02, rng:NextNumber(-650, 650))
+		if p.Magnitude > Config.HubRadius + 10 then
+			local s = rng:NextNumber(30, 90)
+			Build.ellipsoid(folder, CFrame.new(p) * CFrame.Angles(0, rng:NextNumber(0, 6), 0), Vector3.new(s, 0.1, s * 0.7), GRASS:Lerp(Color3.fromRGB(80, 140, 70), rng:NextNumber(0.2, 0.6)), Enum.Material.Grass, { CanCollide = false })
+		end
+	end
+	local tufts = Instance.new("Folder")
+	tufts.Name = "Tufts"
+	tufts.Parent = folder
+	for _ = 1, 160 do
+		local p = Vector3.new(rng:NextNumber(-600, 600), 0, rng:NextNumber(-600, 600))
+		if p.Magnitude > Config.HubRadius + 5 then
+			Props.GrassTuft(tufts, CFrame.new(p), GRASS:Lerp(Color3.fromRGB(60, 120, 50), rng:NextNumber(0, 0.5)))
+		end
+	end
+
 	buildHub(folder)
+
+	local paths = Instance.new("Folder")
+	paths.Name = "Paths"
+	paths.Parent = folder
 	for _, zoneId in Config.ZoneOrder do
 		local zone = Config.Zones[zoneId]
-		buildPath(Config.HubRadius - 2, zone.Angle, zone.Distance - zone.Radius, folder)
+		local dir = polar(zone.Angle, 1)
+		buildPath(dir * (Config.HubRadius - 2), dir * (zone.Distance - zone.Radius - 10), 16, paths)
+		-- Gate where the path leaves the hub
+		Props.Gate(folder, facing(dir * (Config.HubRadius + 4) + Vector3.new(0, 0.1, 0), dir * 1000), 20, "→ " .. zone.Name, ZONE_STYLE[zoneId].Accent)
 		buildZone(zoneId, folder)
+	end
+	for i = 1, Config.PlotCount do
+		local center = Config.PlotCenter(i)
+		local dir = center.Unit
+		buildPath(dir * (Config.HubRadius - 2), dir * (Config.PlotRadius - Config.PlotSize / 2), 10, paths)
 	end
 
 	return folder
