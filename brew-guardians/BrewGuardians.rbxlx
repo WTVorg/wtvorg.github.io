@@ -1,0 +1,5040 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <float name="Brightness">2.5</float>
+      <float name="ClockTime">14.5</float>
+      <bool name="GlobalShadows">true</bool>
+      <Color3 name="OutdoorAmbient">
+        <R>0.55</R>
+        <G>0.55</G>
+        <B>0.6</B>
+      </Color3>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="2">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">CatchMath</string>
+          <string name="Source"><![CDATA[-- Catch odds and the timing of the shake sequence. Shared so the client can
+-- preview odds and play the sequence in lockstep with the server.
+
+local Config = require(script.Parent.Config)
+
+local CatchMath = {}
+
+CatchMath.Shakes = 3
+CatchMath.LandTime = 0.7 -- flask lands and swallows the guardian
+CatchMath.ShakeInterval = 1.15 -- each shake (the burst happens during a shake)
+CatchMath.ResultTime = 0.6 -- lock flash after the final shake
+
+export type ChanceParams = {
+	BaseRate: number,
+	FlaskMult: number,
+	Resistance: number, -- 0..100
+	FedFavorite: boolean?,
+	Stunned: boolean?,
+	Slowed: boolean?,
+	Luck: number?,
+}
+
+-- Same shape as the classic formula: a guardian at full resistance is three
+-- times harder to catch than one worn all the way down.
+function CatchMath.Chance(p: ChanceParams): number
+	local resistance = math.clamp(p.Resistance, 0, 100) / 100
+	local chance = p.BaseRate * p.FlaskMult * (3 - 2 * resistance) / 3
+	if p.FedFavorite then
+		chance *= Config.Catch.FavoriteMult
+	end
+	if p.Stunned then
+		chance *= Config.Catch.StunnedMult
+	elseif p.Slowed then
+		chance *= Config.Catch.SlowedMult
+	end
+	chance *= p.Luck or 1
+	return math.clamp(chance, 0.01, 1)
+end
+
+-- Each shake is an independent check. Passing all of them equals the overall
+-- chance, so a near miss on the last shake is common and honest.
+function CatchMath.ShakeChance(chance: number): number
+	return chance ^ (1 / CatchMath.Shakes)
+end
+
+-- Returns how many shakes passed. Shakes == CatchMath.Shakes means caught.
+function CatchMath.Roll(chance: number, rng: Random): number
+	local perShake = CatchMath.ShakeChance(chance)
+	for i = 1, CatchMath.Shakes do
+		if rng:NextNumber() >= perShake then
+			return i - 1
+		end
+	end
+	return CatchMath.Shakes
+end
+
+function CatchMath.Duration(shakesPassed: number): number
+	if shakesPassed >= CatchMath.Shakes then
+		return CatchMath.LandTime + CatchMath.Shakes * CatchMath.ShakeInterval + CatchMath.ResultTime
+	end
+	-- It bursts out during shake number shakesPassed + 1.
+	return CatchMath.LandTime + (shakesPassed + 1) * CatchMath.ShakeInterval
+end
+
+return CatchMath
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[-- All game tuning lives here. Designers should be able to add a guardian,
+-- ingredient or flask tier by editing this file only.
+
+local Config = {}
+
+----------------------------------------------------------------------
+-- Economy
+----------------------------------------------------------------------
+Config.StartingData = {
+	Coins = 40,
+	Vials = 4,
+	Flasks = { Clay = 3 },
+	Ingredients = { Sunpetal = 2, Dewleaf = 2 },
+}
+
+Config.Shop = {
+	{ Id = "Vial", Name = "Empty Vial", Price = 8, Amount = 1, Description = "Every flask and draught is brewed into a vial." },
+	{ Id = "Vial5", Name = "Vial Crate (x5)", Price = 35, Amount = 5, Description = "Five vials, a small discount." },
+	{ Id = "Pot2", Name = "Copper Cauldron", Price = 400, PotLevel = 2, Description = "+1 brew quality on everything you brew." },
+	{ Id = "Pot3", Name = "Runed Cauldron", Price = 2500, PotLevel = 3, Description = "+2 brew quality on everything you brew." },
+}
+
+-- Robux products. Leave at 0 to hide them. These are deliberately boosts,
+-- never flasks or creatures: selling a random chance at a guardian for Robux
+-- would fall under Roblox's paid random item rules (odds disclosure).
+Config.Monetization = {
+	LuckBoostProductId = 0, -- Developer Product id for "Lucky Brew (15 min)"
+	LuckBoostMinutes = 15,
+	LuckBoostMultiplier = 1.25, -- applied to the final catch chance
+}
+
+Config.IncomeTickSeconds = 1
+Config.MaxPendingIncomeSeconds = 60 * 60 * 2 -- plot stops filling after 2h of income
+Config.MaxPlotDisplays = 12
+Config.ReleaseValueSeconds = 90 -- releasing pays this many seconds of the guardian's income
+
+----------------------------------------------------------------------
+-- Ingredients
+----------------------------------------------------------------------
+Config.IngredientOrder = {
+	"Sunpetal", "Dewleaf", "HoneydewRoot", "EmberPepper", "Ashcap", "Frostcap", "Moonberry", "StarlightNectar",
+}
+
+Config.Ingredients = {
+	Sunpetal = {
+		Name = "Sunpetal", Tier = 1, Color = Color3.fromRGB(255, 214, 74),
+		Zones = { Meadow = 7 }, Respawn = 20,
+		Description = "A cheerful flower that hums when the sun is out.",
+	},
+	Dewleaf = {
+		Name = "Dewleaf", Tier = 1, Color = Color3.fromRGB(110, 220, 170),
+		Zones = { Meadow = 7, Frost = 3 }, Respawn = 20,
+		Description = "Always wet, even at noon.",
+	},
+	HoneydewRoot = {
+		Name = "Honeydew Root", Tier = 2, Color = Color3.fromRGB(214, 160, 92),
+		Zones = { Meadow = 4 }, Respawn = 45,
+		Description = "Sweet, knotted and stubborn to pull up.",
+	},
+	EmberPepper = {
+		Name = "Ember Pepper", Tier = 2, Color = Color3.fromRGB(255, 92, 48),
+		Zones = { Caldera = 6 }, Respawn = 35,
+		Description = "Warm to the touch. Do not lick.",
+	},
+	Ashcap = {
+		Name = "Ashcap", Tier = 3, Color = Color3.fromRGB(120, 110, 120),
+		Zones = { Caldera = 4 }, Respawn = 70,
+		Description = "A mushroom that only grows where something burned.",
+	},
+	Frostcap = {
+		Name = "Frostcap", Tier = 2, Color = Color3.fromRGB(150, 210, 255),
+		Zones = { Frost = 6, Caldera = 1 }, Respawn = 35,
+		Description = "Leaves a ring of frost wherever it is set down.",
+	},
+	Moonberry = {
+		Name = "Moonberry", Tier = 3, Color = Color3.fromRGB(170, 120, 255),
+		Zones = { Frost = 4 }, Respawn = 70,
+		Description = "Glows faintly. Tastes like a cold night.",
+	},
+	StarlightNectar = {
+		Name = "Starlight Nectar", Tier = 4, Color = Color3.fromRGB(255, 250, 210),
+		Zones = { Meadow = 1, Caldera = 1, Frost = 1 }, Respawn = 240,
+		Description = "One drop makes a flask sing. Very rare.",
+	},
+}
+
+----------------------------------------------------------------------
+-- Brewing
+----------------------------------------------------------------------
+-- A capture flask is brewed from 3 ingredients. Quality = sum of tiers
+-- plus the cauldron bonus. Higher quality gives a higher flask tier.
+Config.FlaskIngredientCount = 3
+Config.Flasks = {
+	{ Id = "Clay", Name = "Clay Flask", Mult = 1.0, MinQuality = 0, Color = Color3.fromRGB(196, 132, 92) },
+	{ Id = "Glass", Name = "Glass Flask", Mult = 1.5, MinQuality = 5, Color = Color3.fromRGB(140, 220, 255) },
+	{ Id = "Crystal", Name = "Crystal Flask", Mult = 2.2, MinQuality = 8, Color = Color3.fromRGB(200, 120, 255) },
+	{ Id = "Starlight", Name = "Starlight Flask", Mult = 3.5, MinQuality = 11, Color = Color3.fromRGB(255, 240, 150) },
+}
+
+-- Weakening draughts are thrown to lower a guardian's resistance and slow it.
+Config.DraughtIngredientCount = 2
+Config.Draughts = {
+	{ Id = "Weak", Name = "Weak Draught", Power = 18, MinQuality = 0, Color = Color3.fromRGB(120, 200, 120) },
+	{ Id = "Strong", Name = "Strong Draught", Power = 30, MinQuality = 4, Color = Color3.fromRGB(60, 180, 200) },
+	{ Id = "Potent", Name = "Potent Draught", Power = 45, MinQuality = 7, Color = Color3.fromRGB(230, 80, 160) },
+}
+Config.DraughtSlowSeconds = 6
+
+-- Fusing a caught guardian with 3 ingredients grows it into a mutated form.
+-- Index = the mutation level being reached.
+Config.Mutations = {
+	{ Prefix = "Giant", MinQuality = 5, Scale = 1.45, IncomeMult = 2.5 },
+	{ Prefix = "Mutant", MinQuality = 8, Scale = 1.9, IncomeMult = 6 },
+	{ Prefix = "Colossal", MinQuality = 11, Scale = 2.5, IncomeMult = 15 },
+}
+
+----------------------------------------------------------------------
+-- Catching
+----------------------------------------------------------------------
+Config.Catch = {
+	ThrowRange = 60,
+	FeedRange = 18,
+	ThrowCooldown = 1.0,
+	FlightTime = 0.45,
+	FavoriteMult = 2.0,
+	StunnedMult = 1.5,
+	SlowedMult = 1.25,
+	BreakFreeResistance = 25, -- resistance regained when it bursts out
+	EnragedSeconds = 10,
+	CalmSeconds = 8, -- after being fed its favorite ingredient
+	StunSeconds = 2.5,
+	RegenPerSecond = 1.5, -- resistance regained when no player is near
+	RegenDelay = 10,
+}
+
+Config.Rarities = {
+	Common = { Order = 1, Color = Color3.fromRGB(200, 200, 200) },
+	Uncommon = { Order = 2, Color = Color3.fromRGB(110, 230, 120) },
+	Rare = { Order = 3, Color = Color3.fromRGB(90, 160, 255) },
+	Legendary = { Order = 4, Color = Color3.fromRGB(255, 190, 60) },
+}
+
+----------------------------------------------------------------------
+-- Guardians
+----------------------------------------------------------------------
+-- Behavior: "Skittish" flees and slams when cornered, "Charger" telegraphs a
+-- dash (lure it through hazards), "Caster" lobs orbs at your feet,
+-- "Legendary" mixes all three.
+-- Drop a model named after the id into ServerStorage.GuardianModels to
+-- replace the built-in placeholder body (it needs a PrimaryPart).
+Config.GuardianOrder = { "Mossling", "Thornback", "Cinderpup", "Magmaw", "Glimmerfox", "Aurorath" }
+
+Config.Guardians = {
+	Mossling = {
+		Name = "Mossling", Element = "Nature", Zone = "Meadow", Rarity = "Common",
+		BaseRate = 0.9, Favorite = "Sunpetal", Income = 2,
+		Behavior = "Skittish", Speed = 13, Size = 4,
+		Color = Color3.fromRGB(96, 170, 80), Accent = Color3.fromRGB(255, 214, 74),
+		Attack = { Radius = 10, Damage = 10, Windup = 1.2, Cooldown = 4 },
+		DodgeDrop = 12, HazardDrop = 22, Count = 4, Respawn = 25,
+		Hint = "Turns its face toward anything that blooms in the sun.",
+	},
+	Thornback = {
+		Name = "Thornback", Element = "Nature", Zone = "Meadow", Rarity = "Uncommon",
+		BaseRate = 0.6, Favorite = "HoneydewRoot", Income = 5,
+		Behavior = "Charger", Speed = 11, Size = 6,
+		Color = Color3.fromRGB(70, 110, 60), Accent = Color3.fromRGB(150, 90, 50),
+		Attack = { Length = 45, Width = 7, Damage = 18, Windup = 1.1, Cooldown = 5 },
+		DodgeDrop = 10, HazardDrop = 25, Count = 2, Respawn = 45,
+		Hint = "Digs for something sweet beneath the soil.",
+	},
+	Cinderpup = {
+		Name = "Cinderpup", Element = "Fire", Zone = "Caldera", Rarity = "Common",
+		BaseRate = 0.85, Favorite = "EmberPepper", Income = 4,
+		Behavior = "Caster", Speed = 15, Size = 4,
+		Color = Color3.fromRGB(230, 100, 50), Accent = Color3.fromRGB(255, 220, 90),
+		Attack = { Radius = 7, Damage = 14, Windup = 1.3, Cooldown = 3.5, Orbs = 1 },
+		DodgeDrop = 10, HazardDrop = 15, Count = 4, Respawn = 30,
+		Hint = "Its breath smells of something spicy.",
+	},
+	Magmaw = {
+		Name = "Magmaw", Element = "Fire", Zone = "Caldera", Rarity = "Rare",
+		BaseRate = 0.3, Favorite = "Frostcap", Income = 14,
+		Behavior = "Charger", Speed = 10, Size = 8,
+		Color = Color3.fromRGB(60, 40, 40), Accent = Color3.fromRGB(255, 120, 30),
+		Attack = { Length = 55, Width = 9, Damage = 26, Windup = 1.0, Cooldown = 4.5 },
+		DodgeDrop = 8, HazardDrop = 20, Count = 1, Respawn = 90,
+		Hint = "It is always too hot. It craves the opposite.",
+	},
+	Glimmerfox = {
+		Name = "Glimmerfox", Element = "Ice", Zone = "Frost", Rarity = "Uncommon",
+		BaseRate = 0.55, Favorite = "Moonberry", Income = 9,
+		Behavior = "Skittish", Speed = 18, Size = 5,
+		Color = Color3.fromRGB(200, 230, 255), Accent = Color3.fromRGB(170, 120, 255),
+		Attack = { Radius = 11, Damage = 16, Windup = 1.0, Cooldown = 3.5 },
+		DodgeDrop = 10, HazardDrop = 20, Count = 3, Respawn = 45,
+		Hint = "Only comes out when the moon is up. So does its snack.",
+	},
+	Aurorath = {
+		Name = "Aurorath", Element = "Spirit", Zone = "Frost", Rarity = "Legendary",
+		BaseRate = 0.09, Favorite = "StarlightNectar", Income = 60,
+		Behavior = "Legendary", Speed = 12, Size = 11,
+		Color = Color3.fromRGB(120, 255, 220), Accent = Color3.fromRGB(255, 140, 240),
+		Attack = { Radius = 14, Length = 60, Width = 10, Damage = 30, Windup = 1.1, Cooldown = 3, Orbs = 3 },
+		DodgeDrop = 6, HazardDrop = 12, Count = 1, Respawn = 300,
+		Hint = "Said to drink only what falls from the stars.",
+		Announce = true,
+	},
+}
+
+----------------------------------------------------------------------
+-- World layout
+----------------------------------------------------------------------
+Config.HubRadius = 90
+Config.PlotCount = 6
+Config.PlotRadius = 150
+Config.PlotSize = 60
+
+Config.Zones = {
+	Meadow = {
+		Name = "Meadow Grove", Angle = 270, Distance = 420, Radius = 130,
+		Floor = Color3.fromRGB(110, 180, 90), HazardName = "Bramble Patch",
+		HazardColor = Color3.fromRGB(60, 90, 40), Hazards = 7, DecorKind = "Tree",
+	},
+	Caldera = {
+		Name = "Ember Caldera", Angle = 30, Distance = 420, Radius = 130,
+		Floor = Color3.fromRGB(90, 70, 65), HazardName = "Lava Vent",
+		HazardColor = Color3.fromRGB(255, 110, 30), Hazards = 8, DecorKind = "Rock",
+	},
+	Frost = {
+		Name = "Frost Hollow", Angle = 150, Distance = 420, Radius = 130,
+		Floor = Color3.fromRGB(220, 235, 245), HazardName = "Ice Spikes",
+		HazardColor = Color3.fromRGB(160, 220, 255), Hazards = 7, DecorKind = "Crystal",
+	},
+}
+Config.ZoneOrder = { "Meadow", "Caldera", "Frost" }
+Config.HazardRadius = 9
+Config.HazardPlayerDamage = 8
+
+-- Built-in engine sounds so the place works with zero uploaded assets.
+-- Swap these for your own audio ids.
+Config.Sounds = {
+	Throw = "rbxasset://sounds/swoosh.wav",
+	Shake = "rbxasset://sounds/clickfast.wav",
+	Lock = "rbxasset://sounds/electronicpingshort.wav",
+	Burst = "rbxasset://sounds/collide.wav",
+	Brew = "rbxasset://sounds/button.wav",
+}
+
+----------------------------------------------------------------------
+-- Helpers shared by client and server
+----------------------------------------------------------------------
+function Config.ZoneCenter(zoneId: string): Vector3
+	local zone = Config.Zones[zoneId]
+	local a = math.rad(zone.Angle)
+	return Vector3.new(math.cos(a) * zone.Distance, 0, math.sin(a) * zone.Distance)
+end
+
+function Config.PlotCenter(index: number): Vector3
+	local a = math.rad((index - 1) * (360 / Config.PlotCount))
+	return Vector3.new(math.cos(a) * Config.PlotRadius, 0, math.sin(a) * Config.PlotRadius)
+end
+
+function Config.QualityOf(ingredientIds: { string }, potLevel: number?): number
+	local q = 0
+	for _, id in ingredientIds do
+		local def = Config.Ingredients[id]
+		if def then
+			q += def.Tier
+		end
+	end
+	return q + math.max((potLevel or 1) - 1, 0)
+end
+
+local function pickTier(list, quality)
+	local best = list[1]
+	for _, entry in list do
+		if quality >= entry.MinQuality then
+			best = entry
+		end
+	end
+	return best
+end
+
+function Config.FlaskForQuality(quality: number)
+	return pickTier(Config.Flasks, quality)
+end
+
+function Config.DraughtForQuality(quality: number)
+	return pickTier(Config.Draughts, quality)
+end
+
+function Config.GetFlask(id: string)
+	for _, f in Config.Flasks do
+		if f.Id == id then
+			return f
+		end
+	end
+	return nil
+end
+
+function Config.GetDraught(id: string)
+	for _, d in Config.Draughts do
+		if d.Id == id then
+			return d
+		end
+	end
+	return nil
+end
+
+function Config.GetShopItem(id: string)
+	for _, item in Config.Shop do
+		if item.Id == id then
+			return item
+		end
+	end
+	return nil
+end
+
+function Config.GuardianIncome(entry): number
+	local def = Config.Guardians[entry.Id]
+	if not def then
+		return 0
+	end
+	local mutation = Config.Mutations[entry.Mutation or 0]
+	return def.Income * (mutation and mutation.IncomeMult or 1)
+end
+
+function Config.GuardianDisplayName(entry): string
+	local def = Config.Guardians[entry.Id]
+	local name = def and def.Name or entry.Id
+	local mutation = Config.Mutations[entry.Mutation or 0]
+	if mutation then
+		return mutation.Prefix .. " " .. name
+	end
+	return name
+end
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">Remotes</string>
+          <string name="Source"><![CDATA[-- Creates (server) or waits for (client) every RemoteEvent the game uses.
+
+local RunService = game:GetService("RunService")
+
+local NAMES = {
+	-- server -> client
+	"StateUpdate", -- (data snapshot)
+	"Notify", -- (text, kind)
+	"OpenUI", -- (screenName)
+	"ThrowVisual", -- (fromPos, guardianModel, color, flightTime)
+	"CaptureSequence", -- (info table)
+	"Announce", -- (text) server-wide banner
+	-- client -> server
+	"Throw", -- (kind "Flask"|"Draught", tierId, guardianModel)
+	"Feed", -- (guardianModel, ingredientId)
+	"Brew", -- (mode "Flask"|"Draught", { ingredientIds })
+	"Fuse", -- (guardianUid, { ingredientIds })
+	"Buy", -- (shopItemId)
+	"Release", -- (guardianUid)
+	"BuyLuck", -- ()
+	"RequestState", -- () client is ready for its first snapshot
+}
+
+local Remotes = {}
+
+local folder: Folder
+if RunService:IsServer() then
+	local existing = script.Parent:FindFirstChild("RemoteEvents")
+	if existing then
+		folder = existing :: Folder
+	else
+		local created = Instance.new("Folder")
+		created.Name = "RemoteEvents"
+		created.Parent = script.Parent
+		folder = created
+	end
+	for _, name in NAMES do
+		if not folder:FindFirstChild(name) then
+			local remote = Instance.new("RemoteEvent")
+			remote.Name = name
+			remote.Parent = folder
+		end
+	end
+else
+	folder = script.Parent:WaitForChild("RemoteEvents") :: Folder
+end
+
+for _, name in NAMES do
+	Remotes[name] = folder:WaitForChild(name) :: RemoteEvent
+end
+
+return Remotes
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="6">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="7">
+      <Properties>
+        <string name="Name">Server</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[-- Brew Guardians server entry point.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+require(ReplicatedStorage.Shared.Remotes) -- create the RemoteEvents first
+
+local Actions = require(script.Actions)
+local GuardianService = require(script.GuardianService)
+local Harvest = require(script.Harvest)
+local PlayerData = require(script.PlayerData)
+local Plots = require(script.Plots)
+local WorldBuilder = require(script.WorldBuilder)
+
+WorldBuilder.Build()
+Plots.Start()
+PlayerData.Start()
+Harvest.Start()
+GuardianService.Start()
+Actions.Start()
+
+print("[BrewGuardians] server ready")
+]]></string>
+      </Properties>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
+          <string name="Name">Actions</string>
+          <string name="Source"><![CDATA[-- Handles every request from the client. The client only asks; all checks,
+-- rolls and inventory changes happen here.
+
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CatchMath = require(ReplicatedStorage.Shared.CatchMath)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local GuardianService = require(script.Parent.GuardianService)
+local PlayerData = require(script.Parent.PlayerData)
+local Plots = require(script.Parent.Plots)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+
+local POT_RANGE = 16
+
+local Actions = {}
+
+local rng = Random.new()
+local lastThrow: { [Player]: number } = {}
+
+local function notify(player: Player, text: string, kind: string?)
+	Remotes.Notify:FireClient(player, text, kind or "info")
+end
+
+local function rootOf(player: Player): BasePart?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	return character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function luckFor(data): number
+	if data.LuckUntil and data.LuckUntil > os.time() then
+		return Config.Monetization.LuckBoostMultiplier
+	end
+	return 1
+end
+
+local function journalEntry(data, guardianId: string)
+	local entry = data.Journal[guardianId]
+	if not entry then
+		entry = { Seen = true, Caught = 0, FavoriteKnown = false, Tried = {} }
+		data.Journal[guardianId] = entry
+	end
+	return entry
+end
+
+-- Validates a list of ingredient ids from the client and returns the counts
+-- needed, or nil if the player does not own them.
+local function ingredientCost(data, list: any, expected: number): { [string]: number }?
+	if type(list) ~= "table" or #list ~= expected then
+		return nil
+	end
+	local need = {}
+	for i = 1, expected do
+		local id = list[i]
+		if type(id) ~= "string" or not Config.Ingredients[id] then
+			return nil
+		end
+		need[id] = (need[id] or 0) + 1
+	end
+	for id, count in need do
+		if (data.Ingredients[id] or 0) < count then
+			return nil
+		end
+	end
+	return need
+end
+
+local function spend(data, need: { [string]: number })
+	for id, count in need do
+		data.Ingredients[id] -= count
+	end
+end
+
+local function findGuardianEntry(data, uid: any)
+	if type(uid) ~= "string" then
+		return nil, nil
+	end
+	for i, entry in data.Guardians do
+		if entry.Uid == uid then
+			return entry, i
+		end
+	end
+	return nil, nil
+end
+
+----------------------------------------------------------------------
+-- Throwing
+----------------------------------------------------------------------
+local function resolveFlask(player: Player, g, flask)
+	local data = PlayerData.Get(player)
+	if not data then
+		return
+	end
+	local chance = GuardianService.Chance(g, flask.Mult, luckFor(data))
+	local shakes = CatchMath.Roll(chance, rng)
+	local caught = shakes >= CatchMath.Shakes
+
+	GuardianService.BeginCapture(g)
+	Remotes.CaptureSequence:FireAllClients({
+		Position = GuardianService.GroundPosition(g),
+		Shakes = shakes,
+		FlaskId = flask.Id,
+		Color = flask.Color,
+		GuardianId = g.Id,
+		ThrowerUserId = player.UserId,
+		Chance = chance,
+	})
+
+	task.wait(CatchMath.Duration(shakes))
+
+	if caught and not player.Parent then
+		caught = false -- thrower left mid-shake, let it go
+	end
+	GuardianService.EndCapture(g, caught)
+
+	local pct = math.floor(chance * 100 + 0.5)
+	if caught then
+		local entry = { Uid = PlayerData.NewUid(), Id = g.Id, Mutation = 0, CaughtAt = os.time() }
+		PlayerData.Update(player, function(d)
+			table.insert(d.Guardians, entry)
+			local j = journalEntry(d, g.Id)
+			j.Caught += 1
+			d.Stats.Catches += 1
+			return true
+		end)
+		Plots.Refresh(player)
+		notify(player, string.format("Gotcha! %s was caught! (%d%% chance)", g.Def.Name, pct), "catch")
+		local rarity = Config.Rarities[g.Def.Rarity]
+		if rarity.Order >= 3 then
+			Remotes.Announce:FireAllClients(string.format("%s caught a %s %s!", player.DisplayName, g.Def.Rarity, g.Def.Name))
+		end
+	else
+		if shakes == CatchMath.Shakes - 1 then
+			PlayerData.Update(player, function(d)
+				d.Stats.NearMisses += 1
+				return true
+			end)
+			notify(player, string.format("Argh! It broke out on the last shake! (%d%% chance)", pct), "nearmiss")
+		else
+			notify(player, string.format("%s burst free and it's furious! (%d%% chance)", g.Def.Name, pct), "fail")
+		end
+	end
+end
+
+local function onThrow(player: Player, kind: any, tierId: any, model: any)
+	if kind ~= "Flask" and kind ~= "Draught" then
+		return
+	end
+	if type(tierId) ~= "string" then
+		return
+	end
+	local item = if kind == "Flask" then Config.GetFlask(tierId) else Config.GetDraught(tierId)
+	if not item then
+		return
+	end
+	local data = PlayerData.Get(player)
+	local root = rootOf(player)
+	local g = GuardianService.FromModel(model)
+	if not data or not root or not g then
+		return
+	end
+	local t = os.clock()
+	if lastThrow[player] and t - lastThrow[player] < Config.Catch.ThrowCooldown then
+		return
+	end
+	if (root.Position - GuardianService.GroundPosition(g)).Magnitude > Config.Catch.ThrowRange then
+		notify(player, "Too far away to throw.", "error")
+		return
+	end
+	local bag = if kind == "Flask" then data.Flasks else data.Draughts
+	if (bag[tierId] or 0) <= 0 then
+		notify(player, "You don't have any " .. item.Name .. "s. Brew some at your cauldron!", "error")
+		return
+	end
+	lastThrow[player] = t
+
+	PlayerData.Update(player, function(d)
+		bag[tierId] -= 1
+		d.Stats.Throws += 1
+		journalEntry(d, g.Id).Seen = true
+		return true
+	end)
+
+	Remotes.ThrowVisual:FireAllClients(root.Position, model, item.Color, Config.Catch.FlightTime)
+	task.wait(Config.Catch.FlightTime)
+
+	g = GuardianService.FromModel(model)
+	if not g then
+		-- Someone else's flask got there first.
+		PlayerData.Update(player, function()
+			bag[tierId] += 1
+			return true
+		end)
+		notify(player, "Missed! Your " .. item.Name .. " bounced back to you.", "info")
+		return
+	end
+
+	if kind == "Draught" then
+		GuardianService.ApplyDraught(g, item.Power, player)
+	else
+		resolveFlask(player, g, item)
+	end
+end
+
+----------------------------------------------------------------------
+-- Feeding
+----------------------------------------------------------------------
+local function onFeed(player: Player, model: any, ingredientId: any)
+	if type(ingredientId) ~= "string" or not Config.Ingredients[ingredientId] then
+		return
+	end
+	local data = PlayerData.Get(player)
+	local root = rootOf(player)
+	local g = GuardianService.FromModel(model)
+	if not data or not root or not g then
+		return
+	end
+	if (root.Position - GuardianService.GroundPosition(g)).Magnitude > Config.Catch.FeedRange + g.Def.Size then
+		notify(player, "Get closer to feed it.", "error")
+		return
+	end
+	if (data.Ingredients[ingredientId] or 0) <= 0 then
+		notify(player, "You're out of " .. Config.Ingredients[ingredientId].Name .. ".", "error")
+		return
+	end
+	if g.FedFavorite then
+		notify(player, g.Def.Name .. " is already happily munching.", "info")
+		return
+	end
+
+	local isFavorite = g.Def.Favorite == ingredientId
+	PlayerData.Update(player, function(d)
+		d.Ingredients[ingredientId] -= 1
+		local j = journalEntry(d, g.Id)
+		j.Tried[ingredientId] = true
+		if isFavorite then
+			j.FavoriteKnown = true
+		end
+		return true
+	end)
+	GuardianService.Feed(g, isFavorite)
+
+	local ingredientName = Config.Ingredients[ingredientId].Name
+	if isFavorite then
+		GuardianService.Celebrate(g, Color3.fromRGB(255, 120, 200))
+		notify(
+			player,
+			string.format("%s loves the %s! It calms down. Catch odds x%d!", g.Def.Name, ingredientName, Config.Catch.FavoriteMult),
+			"favorite"
+		)
+	else
+		notify(player, string.format("%s sniffs the %s and turns away.", g.Def.Name, ingredientName), "info")
+	end
+end
+
+----------------------------------------------------------------------
+-- Brewing and fusing
+----------------------------------------------------------------------
+local function onBrew(player: Player, mode: any, list: any)
+	local data = PlayerData.Get(player)
+	if not data then
+		return
+	end
+	if mode ~= "Flask" and mode ~= "Draught" then
+		return
+	end
+	if not Plots.NearOwnPot(player, POT_RANGE) then
+		notify(player, "Stand next to your cauldron to brew.", "error")
+		return
+	end
+	local count = if mode == "Flask" then Config.FlaskIngredientCount else Config.DraughtIngredientCount
+	local need = ingredientCost(data, list, count)
+	if not need then
+		notify(player, "You don't have those ingredients.", "error")
+		return
+	end
+	if data.Vials <= 0 then
+		notify(player, "You need an Empty Vial. Buy them at the shop in the hub.", "error")
+		return
+	end
+
+	local quality = Config.QualityOf(list, data.PotLevel)
+	local result = if mode == "Flask" then Config.FlaskForQuality(quality) else Config.DraughtForQuality(quality)
+	PlayerData.Update(player, function(d)
+		spend(d, need)
+		d.Vials -= 1
+		local bag = if mode == "Flask" then d.Flasks else d.Draughts
+		bag[result.Id] = (bag[result.Id] or 0) + 1
+		d.Stats.Brews += 1
+		return true
+	end)
+	Plots.BrewEffect(player, result.Color)
+	notify(player, string.format("Brewed a %s! (quality %d)", result.Name, quality), "brew")
+end
+
+local function onFuse(player: Player, uid: any, list: any)
+	local data = PlayerData.Get(player)
+	if not data then
+		return
+	end
+	if not Plots.NearOwnPot(player, POT_RANGE) then
+		notify(player, "Stand next to your cauldron to fuse.", "error")
+		return
+	end
+	local entry = findGuardianEntry(data, uid)
+	if not entry then
+		return
+	end
+	local nextLevel = (entry.Mutation or 0) + 1
+	local mutation = Config.Mutations[nextLevel]
+	if not mutation then
+		notify(player, "This guardian can't grow any bigger.", "error")
+		return
+	end
+	local need = ingredientCost(data, list, Config.FlaskIngredientCount)
+	if not need then
+		notify(player, "You don't have those ingredients.", "error")
+		return
+	end
+	local quality = Config.QualityOf(list, data.PotLevel)
+	if quality < mutation.MinQuality then
+		notify(player, string.format("Needs brew quality %d to become %s (you have %d).", mutation.MinQuality, mutation.Prefix, quality), "error")
+		return
+	end
+	PlayerData.Update(player, function(d)
+		spend(d, need)
+		entry.Mutation = nextLevel
+		return true
+	end)
+	Plots.Refresh(player)
+	Plots.BrewEffect(player, Color3.fromRGB(255, 80, 200))
+	notify(player, string.format("It grew into a %s!", Config.GuardianDisplayName(entry)), "catch")
+end
+
+----------------------------------------------------------------------
+-- Shop and collection
+----------------------------------------------------------------------
+local function onBuy(player: Player, itemId: any)
+	if type(itemId) ~= "string" then
+		return
+	end
+	local item = Config.GetShopItem(itemId)
+	local data = PlayerData.Get(player)
+	if not item or not data then
+		return
+	end
+	if item.PotLevel and data.PotLevel ~= item.PotLevel - 1 then
+		notify(player, if data.PotLevel >= item.PotLevel then "You already own that." else "Buy the previous cauldron first.", "error")
+		return
+	end
+	if data.Coins < item.Price then
+		notify(player, "Not enough coins.", "error")
+		return
+	end
+	PlayerData.Update(player, function(d)
+		d.Coins -= item.Price
+		if item.PotLevel then
+			d.PotLevel = item.PotLevel
+		else
+			d.Vials += item.Amount
+		end
+		return true
+	end)
+	notify(player, "Bought " .. item.Name .. "!", "coins")
+end
+
+local function onRelease(player: Player, uid: any)
+	local data = PlayerData.Get(player)
+	if not data then
+		return
+	end
+	local entry, index = findGuardianEntry(data, uid)
+	if not entry or not index then
+		return
+	end
+	local value = math.floor(Config.GuardianIncome(entry) * Config.ReleaseValueSeconds)
+	PlayerData.Update(player, function(d)
+		table.remove(d.Guardians, index)
+		d.Coins += value
+		return true
+	end)
+	Plots.Refresh(player)
+	notify(player, string.format("Released %s. +%d coins", Config.GuardianDisplayName(entry), value), "coins")
+end
+
+----------------------------------------------------------------------
+-- Robux luck boost (a boost, never a random item)
+----------------------------------------------------------------------
+local function onBuyLuck(player: Player)
+	local id = Config.Monetization.LuckBoostProductId
+	if id == 0 then
+		notify(player, "Lucky Brew isn't on sale yet.", "info")
+		return
+	end
+	MarketplaceService:PromptProductPurchase(player, id)
+end
+
+local function processReceipt(receipt)
+	local player = Players:GetPlayerByUserId(receipt.PlayerId)
+	local data = player and PlayerData.Get(player)
+	if not player or not data then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	if data.Purchases[receipt.PurchaseId] then
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+	if receipt.ProductId ~= Config.Monetization.LuckBoostProductId then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	PlayerData.Update(player, function(d)
+		local start = math.max(d.LuckUntil or 0, os.time())
+		d.LuckUntil = start + Config.Monetization.LuckBoostMinutes * 60
+		d.Purchases[receipt.PurchaseId] = true
+		return true
+	end)
+	PlayerData.Save(player)
+	notify(player, "Lucky Brew active! Catch odds boosted.", "favorite")
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
+----------------------------------------------------------------------
+-- Journal: mark guardians as seen when you get close
+----------------------------------------------------------------------
+local function seenLoop()
+	while true do
+		task.wait(2)
+		local wild = GuardianService.All()
+		for _, player in Players:GetPlayers() do
+			local data = PlayerData.Get(player)
+			local root = rootOf(player)
+			if data and root then
+				local changed = false
+				for _, g in wild do
+					if not data.Journal[g.Id] and (root.Position - g.Position).Magnitude < 50 then
+						journalEntry(data, g.Id)
+						changed = true
+						notify(player, "New guardian spotted: " .. g.Def.Name .. "! (added to your Journal)", "info")
+					end
+				end
+				if changed then
+					PlayerData.Push(player)
+				end
+			end
+		end
+	end
+end
+
+function Actions.Start()
+	Remotes.Throw.OnServerEvent:Connect(onThrow)
+	Remotes.Feed.OnServerEvent:Connect(onFeed)
+	Remotes.Brew.OnServerEvent:Connect(onBrew)
+	Remotes.Fuse.OnServerEvent:Connect(onFuse)
+	Remotes.Buy.OnServerEvent:Connect(onBuy)
+	Remotes.Release.OnServerEvent:Connect(onRelease)
+	Remotes.BuyLuck.OnServerEvent:Connect(onBuyLuck)
+	MarketplaceService.ProcessReceipt = processReceipt
+
+	local shopPrompt = WorldBuilder.ShopPrompt
+	if shopPrompt then
+		shopPrompt.Triggered:Connect(function(player)
+			Remotes.OpenUI:FireClient(player, "Shop")
+		end)
+	end
+
+	Players.PlayerRemoving:Connect(function(player)
+		lastThrow[player] = nil
+	end)
+
+	task.spawn(seenLoop)
+end
+
+return Actions
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">GuardianModels</string>
+          <string name="Source"><![CDATA[-- Builds a guardian body. Uses ServerStorage.GuardianModels[id] when it
+-- exists, otherwise a placeholder creature made of parts.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local GuardianModels = {}
+
+local function weldTo(root: BasePart, p: BasePart)
+	p.Anchored = false
+	p.CanCollide = false
+	p.Massless = true
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = p
+	weld.Parent = p
+end
+
+local function add(model: Model, root: BasePart, props): Part
+	local p = Instance.new("Part")
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.SmoothPlastic
+	local offset = props.Offset or CFrame.identity
+	props.Offset = nil
+	for k, v in props do
+		(p :: any)[k] = v
+	end
+	p.CFrame = root.CFrame * offset
+	p.Parent = model
+	weldTo(root, p)
+	return p
+end
+
+local function placeholder(id: string): Model
+	local def = Config.Guardians[id]
+	local s = def.Size
+	local model = Instance.new("Model")
+
+	local root = Instance.new("Part")
+	root.Name = "Root"
+	root.Size = Vector3.new(s, s, s)
+	root.Transparency = 1
+	root.CanCollide = false
+	root.Anchored = true
+	root.CFrame = CFrame.new(0, s / 2, 0)
+	root.Parent = model
+	model.PrimaryPart = root
+
+	local body = add(model, root, {
+		Name = "Body",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * s,
+		Color = def.Color,
+		Material = if def.Element == "Ice" then Enum.Material.Glass else Enum.Material.SmoothPlastic,
+	})
+	body.CastShadow = true
+
+	local head = add(model, root, {
+		Name = "Head",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * s * 0.65,
+		Color = def.Color,
+		Offset = CFrame.new(0, s * 0.35, -s * 0.45),
+	})
+
+	for _, side in { -1, 1 } do
+		add(model, root, {
+			Name = "Eye",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * s * 0.16,
+			Color = Color3.new(1, 1, 1),
+			Material = Enum.Material.Neon,
+			Offset = CFrame.new(side * s * 0.14, s * 0.45, -s * 0.74),
+		})
+		add(model, root, {
+			Name = "Pupil",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * s * 0.08,
+			Color = Color3.new(0.05, 0.05, 0.08),
+			Offset = CFrame.new(side * s * 0.14, s * 0.45, -s * 0.81),
+		})
+
+		-- Element features
+		if def.Element == "Nature" then
+			add(model, root, {
+				Name = "Leaf",
+				Size = Vector3.new(s * 0.1, s * 0.5, s * 0.3),
+				Color = def.Accent,
+				Material = Enum.Material.Grass,
+				Offset = CFrame.new(side * s * 0.2, s * 0.8, -s * 0.4) * CFrame.Angles(0, 0, side * math.rad(-25)),
+			})
+		elseif def.Element == "Fire" then
+			add(model, root, {
+				Name = "Horn",
+				Shape = Enum.PartType.Wedge,
+				Size = Vector3.new(s * 0.12, s * 0.45, s * 0.2),
+				Color = def.Accent,
+				Material = Enum.Material.Neon,
+				Offset = CFrame.new(side * s * 0.22, s * 0.78, -s * 0.38),
+			})
+		else
+			add(model, root, {
+				Name = "Ear",
+				Shape = Enum.PartType.Wedge,
+				Size = Vector3.new(s * 0.08, s * 0.4, s * 0.25),
+				Color = def.Accent,
+				Material = Enum.Material.Neon,
+				Offset = CFrame.new(side * s * 0.22, s * 0.78, -s * 0.42) * CFrame.Angles(0, math.rad(180), 0),
+			})
+		end
+
+		-- Stubby feet
+		for _, front in { -1, 1 } do
+			add(model, root, {
+				Name = "Foot",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.one * s * 0.3,
+				Color = def.Accent,
+				Offset = CFrame.new(side * s * 0.3, -s * 0.42, front * s * 0.25),
+			})
+		end
+	end
+
+	add(model, root, {
+		Name = "Tail",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(s * 0.3, s * 0.3, s * 0.6),
+		Color = def.Accent,
+		Material = Enum.Material.Neon,
+		Offset = CFrame.new(0, s * 0.1, s * 0.55),
+	})
+
+	if def.Behavior == "Charger" then
+		add(model, root, {
+			Name = "Spines",
+			Shape = Enum.PartType.Wedge,
+			Size = Vector3.new(s * 0.15, s * 0.45, s * 0.9),
+			Color = def.Accent,
+			Offset = CFrame.new(0, s * 0.55, s * 0.05),
+		})
+	end
+
+	local light = Instance.new("PointLight")
+	light.Color = def.Accent
+	light.Range = s * 2
+	light.Brightness = if def.Rarity == "Legendary" then 3 else 1
+	light.Parent = head
+
+	if def.Rarity == "Legendary" or def.Rarity == "Rare" then
+		local aura = Instance.new("ParticleEmitter")
+		aura.Name = "Aura"
+		aura.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		aura.Color = ColorSequence.new(def.Accent, def.Color)
+		aura.Size = NumberSequence.new(s * 0.15, 0)
+		aura.Lifetime = NumberRange.new(1, 1.6)
+		aura.Rate = if def.Rarity == "Legendary" then 25 else 8
+		aura.Speed = NumberRange.new(1, 3)
+		aura.SpreadAngle = Vector2.new(180, 180)
+		aura.Parent = body
+	end
+
+	return model
+end
+
+-- Returns a model whose PrimaryPart pivot sits at ground level + half height.
+function GuardianModels.Build(id: string, mutation: number?): Model
+	local custom = ServerStorage:FindFirstChild("GuardianModels")
+	local template = custom and custom:FindFirstChild(id)
+	local model: Model
+	if template and template:IsA("Model") and template.PrimaryPart then
+		model = template:Clone()
+		-- Everything anchored: the server moves the whole model with PivotTo.
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Anchored = true
+				d.CanCollide = false
+			end
+		end
+	else
+		model = placeholder(id)
+	end
+	model.Name = id
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+
+	local m = Config.Mutations[mutation or 0]
+	if m then
+		model:ScaleTo(m.Scale)
+		-- Mutated forms glow a little.
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") and d.Name == "Tail" then
+				d.Color = Color3.fromRGB(255, 80, 200)
+			end
+		end
+	end
+	return model
+end
+
+-- Moves the model up or down so its lowest point sits at groundY.
+function GuardianModels.SitOnGround(model: Model, groundY: number)
+	local cf, size = model:GetBoundingBox()
+	local bottom = cf.Position.Y - size.Y / 2
+	model:PivotTo(model:GetPivot() + Vector3.new(0, groundY - bottom, 0))
+end
+
+return GuardianModels
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">GuardianService</string>
+          <string name="Source"><![CDATA[-- Wild guardians: spawning, chase AI, attacks, hazards and resistance.
+-- Guardians are anchored models moved by the server every frame.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
+local TweenService = game:GetService("TweenService")
+
+local CatchMath = require(ReplicatedStorage.Shared.CatchMath)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local GuardianModels = require(script.Parent.GuardianModels)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+
+local AGGRO_RANGE = 45
+local DASH_SPEED = 75
+local DODGE_CREDIT_RANGE = 16
+local TELEGRAPH_COLOR = Color3.fromRGB(255, 50, 50)
+
+local GuardianService = {}
+
+local rng = Random.new()
+local guardians: { [Model]: any } = {}
+local folder: Folder
+local effects: Folder
+local hiddenFolder: Folder
+local lastNotify: { [Player]: number } = {}
+
+----------------------------------------------------------------------
+-- Small helpers
+----------------------------------------------------------------------
+local function flat(v: Vector3): Vector3
+	return Vector3.new(v.X, 0, v.Z)
+end
+
+local function rootOf(player: Player): BasePart?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	return character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function notifyThrottled(player: Player, text: string, kind: string)
+	local now = os.clock()
+	if lastNotify[player] and now - lastNotify[player] < 0.6 then
+		return
+	end
+	lastNotify[player] = now
+	Remotes.Notify:FireClient(player, text, kind)
+end
+
+local function playersNear(position: Vector3, radius: number): { Player }
+	local out = {}
+	for _, player in Players:GetPlayers() do
+		local root = rootOf(player)
+		if root and (flat(root.Position) - flat(position)).Magnitude <= radius then
+			table.insert(out, player)
+		end
+	end
+	return out
+end
+
+local function damagePlayer(player: Player, amount: number)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:TakeDamage(amount)
+	end
+end
+
+local function telegraphDisc(position: Vector3, radius: number, windup: number): Part
+	local p = WorldBuilder.Disc("Telegraph", position + Vector3.new(0, 0.35, 0), radius * 0.25, 0.2, TELEGRAPH_COLOR, Enum.Material.Neon, effects)
+	p.CanCollide = false
+	p.CanQuery = false
+	p.Transparency = 0.45
+	TweenService:Create(p, TweenInfo.new(windup, Enum.EasingStyle.Linear), {
+		Size = Vector3.new(0.2, radius * 2, radius * 2),
+	}):Play()
+	return p
+end
+
+local function shockwave(position: Vector3, radius: number, color: Color3)
+	local p = WorldBuilder.Disc("Shockwave", position + Vector3.new(0, 0.5, 0), radius * 0.5, 0.6, color, Enum.Material.Neon, effects)
+	p.CanCollide = false
+	p.CanQuery = false
+	local tween = TweenService:Create(p, TweenInfo.new(0.35), {
+		Size = Vector3.new(0.6, radius * 2.3, radius * 2.3),
+		Transparency = 1,
+	})
+	tween:Play()
+	tween.Completed:Once(function()
+		p:Destroy()
+	end)
+end
+
+----------------------------------------------------------------------
+-- State
+----------------------------------------------------------------------
+local function now()
+	return os.clock()
+end
+
+local function isStunned(g)
+	return now() < g.StunUntil
+end
+local function isSlowed(g)
+	return now() < g.SlowUntil
+end
+local function isEnraged(g)
+	return now() < g.EnragedUntil
+end
+local function isCalm(g)
+	return now() < g.CalmUntil
+end
+
+local function syncAttributes(g)
+	local model = g.Model
+	local function set(name, value)
+		if model:GetAttribute(name) ~= value then
+			model:SetAttribute(name, value)
+		end
+	end
+	set("Resistance", math.floor(g.Resistance + 0.5))
+	set("FedFavorite", g.FedFavorite)
+	set("Stunned", isStunned(g))
+	set("Slowed", isSlowed(g))
+	set("Enraged", isEnraged(g))
+	set("Calm", isCalm(g))
+end
+
+local function canAct(g)
+	return g.Alive and not g.Capturing
+end
+
+function GuardianService.Weaken(g, amount: number, player: Player?, reason: string?)
+	if not canAct(g) then
+		return
+	end
+	local before = g.Resistance
+	g.Resistance = math.max(0, g.Resistance - amount)
+	if player and reason and before > g.Resistance then
+		notifyThrottled(
+			player,
+			string.format("%s! %s resistance -%d", reason, g.Def.Name, math.floor(before - g.Resistance + 0.5)),
+			"weaken"
+		)
+	end
+end
+
+local function creditDodge(g, candidates: { Player })
+	for _, player in candidates do
+		GuardianService.Weaken(g, g.Def.DodgeDrop, player, "Dodged")
+	end
+end
+
+----------------------------------------------------------------------
+-- Attacks (each runs in its own thread and sets g.Busy)
+----------------------------------------------------------------------
+local function waitWindup(g, seconds: number): boolean
+	local t = 0
+	while t < seconds do
+		t += task.wait()
+		if not canAct(g) or isStunned(g) then
+			return false
+		end
+	end
+	return true
+end
+
+local function cooldown(g)
+	local mult = if isEnraged(g) then 0.6 else 1
+	g.NextAttack = now() + g.Def.Attack.Cooldown * mult * rng:NextNumber(0.85, 1.2)
+end
+
+local function slam(g)
+	local atk = g.Def.Attack
+	local center = g.Position
+	local tele = telegraphDisc(center, atk.Radius, atk.Windup)
+	local ok = waitWindup(g, atk.Windup)
+	tele:Destroy()
+	if ok then
+		shockwave(center, atk.Radius, g.Def.Accent)
+		local hit = playersNear(center, atk.Radius)
+		for _, player in hit do
+			damagePlayer(player, atk.Damage)
+		end
+		if #hit == 0 then
+			creditDodge(g, playersNear(center, atk.Radius + DODGE_CREDIT_RANGE))
+		end
+	end
+	cooldown(g)
+end
+
+local function charge(g, target: Player)
+	local atk = g.Def.Attack
+	local targetRoot = rootOf(target)
+	if not targetRoot then
+		return
+	end
+	local dir = flat(targetRoot.Position - g.Position)
+	if dir.Magnitude < 0.1 then
+		dir = g.Facing
+	end
+	dir = dir.Unit
+	g.Facing = dir
+
+	local start = g.Position
+	local mid = start + dir * (atk.Length / 2)
+	local tele = WorldBuilder.Part({
+		Name = "Telegraph",
+		Size = Vector3.new(atk.Width, 0.2, atk.Length),
+		CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.35, 0), mid + dir + Vector3.new(0, 0.35, 0)),
+		Color = TELEGRAPH_COLOR,
+		Material = Enum.Material.Neon,
+		Transparency = 0.5,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = effects,
+	})
+	local ok = waitWindup(g, atk.Windup)
+	tele:Destroy()
+	if not ok then
+		cooldown(g)
+		return
+	end
+
+	local travelled = 0
+	local hitPlayers = {}
+	g.Dashing = true
+	while travelled < atk.Length and canAct(g) and not isStunned(g) do
+		local dt = RunService.Heartbeat:Wait()
+		local step = math.min(DASH_SPEED * dt, atk.Length - travelled)
+		local nextPos = g.Position + dir * step
+		local offset = nextPos - g.ZoneCenter
+		if offset.Magnitude > g.ZoneRadius then
+			break -- hit the edge of its territory
+		end
+		g.Position = nextPos
+		travelled += step
+		for _, player in playersNear(g.Position, atk.Width / 2 + g.Def.Size * 0.4) do
+			if not hitPlayers[player] then
+				hitPlayers[player] = true
+				damagePlayer(player, atk.Damage)
+			end
+		end
+	end
+	g.Dashing = false
+
+	if canAct(g) and not hitPlayers[target] then
+		local root = rootOf(target)
+		if root and (flat(root.Position) - start).Magnitude <= atk.Length + DODGE_CREDIT_RANGE then
+			creditDodge(g, { target })
+		end
+	end
+	cooldown(g)
+end
+
+local function orbs(g, target: Player)
+	local atk = g.Def.Attack
+	local targetRoot = rootOf(target)
+	if not targetRoot then
+		return
+	end
+	local spots = {}
+	local base = flat(targetRoot.Position)
+	for i = 1, atk.Orbs or 1 do
+		local offset = if i == 1
+			then Vector3.zero
+			else Vector3.new(rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1)).Unit * atk.Radius * 1.6
+		table.insert(spots, base + offset)
+	end
+	local teles = {}
+	for _, spot in spots do
+		table.insert(teles, telegraphDisc(spot, atk.Radius, atk.Windup))
+	end
+	local ok = waitWindup(g, atk.Windup)
+	for _, t in teles do
+		t:Destroy()
+	end
+	if ok then
+		local targetHit = false
+		for _, spot in spots do
+			shockwave(spot, atk.Radius, g.Def.Accent)
+			for _, player in playersNear(spot, atk.Radius) do
+				damagePlayer(player, atk.Damage)
+				if player == target then
+					targetHit = true
+				end
+			end
+		end
+		if not targetHit and rootOf(target) then
+			creditDodge(g, { target })
+		end
+	end
+	cooldown(g)
+end
+
+local function startAttack(g, kind: string, target: Player)
+	g.Busy = true
+	task.spawn(function()
+		local ok, err = pcall(function()
+			if kind == "Slam" then
+				slam(g)
+			elseif kind == "Charge" then
+				charge(g, target)
+			else
+				orbs(g, target)
+			end
+		end)
+		if not ok then
+			warn("[Guardian] attack error:", err)
+		end
+		g.Busy = false
+		g.Dashing = false
+	end)
+end
+
+----------------------------------------------------------------------
+-- Movement and AI
+----------------------------------------------------------------------
+local function inHazard(zoneId: string, position: Vector3, pad: number)
+	for _, hazard in WorldBuilder.Hazards do
+		if hazard.Zone == zoneId and (flat(hazard.Position) - flat(position)).Magnitude < hazard.Radius + pad then
+			return hazard
+		end
+	end
+	return nil
+end
+
+local function pickWanderTarget(g): Vector3
+	for _ = 1, 12 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local r = math.sqrt(rng:NextNumber()) * (g.ZoneRadius - 8)
+		local p = g.ZoneCenter + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+		if not inHazard(g.ZoneId, p, g.Def.Size + 3) then
+			return p
+		end
+	end
+	return g.ZoneCenter
+end
+
+local function nearestTarget(g): (Player?, number)
+	local best, bestDist = nil, math.huge
+	for _, player in Players:GetPlayers() do
+		local root = rootOf(player)
+		if root then
+			local inZone = (flat(root.Position) - g.ZoneCenter).Magnitude <= g.ZoneRadius + 20
+			local d = (flat(root.Position) - g.Position).Magnitude
+			if inZone and d < bestDist then
+				best, bestDist = player, d
+			end
+		end
+	end
+	if bestDist > AGGRO_RANGE then
+		return nil, bestDist
+	end
+	return best, bestDist
+end
+
+local function move(g, direction: Vector3, speed: number, dt: number): boolean
+	if direction.Magnitude < 0.01 then
+		return false
+	end
+	direction = flat(direction).Unit
+	g.Facing = g.Facing:Lerp(direction, math.min(dt * 8, 1))
+	if g.Facing.Magnitude > 0.01 then
+		g.Facing = g.Facing.Unit
+	end
+	local nextPos = g.Position + direction * speed * dt
+	local offset = nextPos - g.ZoneCenter
+	local cornered = false
+	if offset.Magnitude > g.ZoneRadius then
+		nextPos = g.ZoneCenter + offset.Unit * g.ZoneRadius
+		cornered = true
+	end
+	g.Position = nextPos
+	g.Moving = true
+	return cornered
+end
+
+local function think(g, dt: number)
+	local def = g.Def
+	local t = now()
+	g.Moving = false
+
+	if g.Busy or isStunned(g) then
+		return
+	end
+
+	local speed = def.Speed * (if isSlowed(g) then 0.5 else 1) * (if isEnraged(g) then 1.4 else 1)
+	local target, dist = nearestTarget(g)
+
+	if target and not isCalm(g) then
+		g.LastPlayerNear = t
+		local root = rootOf(target) :: BasePart
+		local toTarget = flat(root.Position) - g.Position
+		local ready = t >= g.NextAttack
+		local behavior = def.Behavior
+		local atk = def.Attack
+
+		if behavior == "Skittish" then
+			local cornered = false
+			if dist < 26 then
+				cornered = move(g, -toTarget, speed, dt)
+			end
+			if ready and (dist < atk.Radius * 0.85 or (cornered and dist < atk.Radius * 1.5)) then
+				startAttack(g, "Slam", target)
+			end
+		elseif behavior == "Charger" then
+			if dist > atk.Length * 0.6 then
+				move(g, toTarget, speed, dt)
+			elseif ready then
+				startAttack(g, "Charge", target)
+			end
+		elseif behavior == "Caster" then
+			if dist < 18 then
+				move(g, -toTarget, speed, dt)
+			elseif dist > 34 then
+				move(g, toTarget, speed, dt)
+			end
+			if ready then
+				startAttack(g, "Orbs", target)
+			end
+		else -- Legendary: rotates through every attack
+			if dist > 28 then
+				move(g, toTarget, speed, dt)
+			end
+			if ready then
+				g.AttackIndex = (g.AttackIndex % 3) + 1
+				local kind = ({ "Slam", "Charge", "Orbs" })[g.AttackIndex]
+				if kind == "Slam" and dist > atk.Radius * 1.2 then
+					kind = "Orbs"
+				end
+				startAttack(g, kind, target)
+			end
+		end
+		return
+	end
+
+	-- Nobody close (or calmed down): wander and slowly recover.
+	if not target and t - g.LastPlayerNear > Config.Catch.RegenDelay then
+		g.Resistance = math.min(100, g.Resistance + Config.Catch.RegenPerSecond * dt)
+	end
+	if t < g.PauseUntil then
+		return
+	end
+	local toWander = g.WanderTarget - g.Position
+	if toWander.Magnitude < 2 then
+		g.WanderTarget = pickWanderTarget(g)
+		g.PauseUntil = t + rng:NextNumber(1, 4)
+		return
+	end
+	move(g, toWander, speed * 0.45, dt)
+end
+
+local function checkHazards(g)
+	if now() < g.HazardCooldownUntil then
+		return
+	end
+	local hazard = inHazard(g.ZoneId, g.Position, g.Def.Size * 0.3)
+	if not hazard then
+		return
+	end
+	g.HazardCooldownUntil = now() + 4
+	g.StunUntil = now() + Config.Catch.StunSeconds
+	local before = g.Resistance
+	g.Resistance = math.max(0, g.Resistance - g.Def.HazardDrop)
+	shockwave(g.Position, g.Def.Size, hazard.Part.Color)
+	local text = string.format(
+		"%s stumbled into the %s! Resistance -%d",
+		g.Def.Name,
+		hazard.Name,
+		math.floor(before - g.Resistance + 0.5)
+	)
+	for _, player in playersNear(g.Position, 90) do
+		notifyThrottled(player, text, "weaken")
+	end
+end
+
+local function render(g)
+	local bob = if g.Moving then math.abs(math.sin(now() * 10)) * 0.4 else math.sin(now() * 2) * 0.15
+	if isStunned(g) then
+		bob = 0
+	end
+	local pos = g.Position + Vector3.new(0, g.HalfHeight + bob, 0)
+	local facing = if g.Facing.Magnitude > 0.01 then g.Facing else Vector3.new(0, 0, -1)
+	local cf = CFrame.lookAt(pos, pos + facing)
+	if isStunned(g) then
+		cf *= CFrame.Angles(0, 0, math.sin(now() * 25) * 0.15)
+	end
+	g.Model:PivotTo(cf)
+end
+
+----------------------------------------------------------------------
+-- Spawning
+----------------------------------------------------------------------
+local spawnGuardian
+
+local function scheduleRespawn(id: string)
+	task.delay(Config.Guardians[id].Respawn, function()
+		spawnGuardian(id)
+	end)
+end
+
+function spawnGuardian(id: string)
+	local def = Config.Guardians[id]
+	local zone = Config.Zones[def.Zone]
+	local model = GuardianModels.Build(id)
+	model:SetAttribute("GuardianId", id)
+
+	local g = {
+		Id = id,
+		Def = def,
+		Model = model,
+		ZoneId = def.Zone,
+		ZoneCenter = Config.ZoneCenter(def.Zone),
+		ZoneRadius = zone.Radius - 6,
+		Position = Vector3.zero,
+		Facing = Vector3.new(0, 0, -1),
+		HalfHeight = def.Size / 2,
+		Resistance = 100,
+		FedFavorite = false,
+		StunUntil = 0,
+		SlowUntil = 0,
+		EnragedUntil = 0,
+		CalmUntil = 0,
+		NextAttack = 0,
+		HazardCooldownUntil = 0,
+		LastPlayerNear = 0,
+		PauseUntil = 0,
+		AttackIndex = 0,
+		Busy = false,
+		Dashing = false,
+		Moving = false,
+		Capturing = false,
+		Alive = true,
+	}
+	g.Position = pickWanderTarget(g)
+	g.WanderTarget = pickWanderTarget(g)
+	guardians[model] = g
+	syncAttributes(g)
+	render(g)
+	model.Parent = folder
+
+	if def.Announce then
+		Remotes.Announce:FireAllClients(string.format("A legendary %s has appeared in %s!", def.Name, zone.Name))
+	end
+	return g
+end
+
+----------------------------------------------------------------------
+-- Public API used by the action handlers
+----------------------------------------------------------------------
+function GuardianService.FromModel(model: Instance?)
+	if typeof(model) ~= "Instance" then
+		return nil
+	end
+	local g = guardians[model :: Model]
+	if g and canAct(g) then
+		return g
+	end
+	return nil
+end
+
+function GuardianService.Chance(g, flaskMult: number, luck: number): number
+	return CatchMath.Chance({
+		BaseRate = g.Def.BaseRate,
+		FlaskMult = flaskMult,
+		Resistance = g.Resistance,
+		FedFavorite = g.FedFavorite,
+		Stunned = isStunned(g),
+		Slowed = isSlowed(g),
+		Luck = luck,
+	})
+end
+
+function GuardianService.GroundPosition(g): Vector3
+	return g.Position
+end
+
+-- Live, catchable guardians.
+function GuardianService.All()
+	local out = {}
+	for _, g in guardians do
+		if canAct(g) then
+			table.insert(out, g)
+		end
+	end
+	return out
+end
+
+function GuardianService.Celebrate(g, color: Color3)
+	local root = g.Model.PrimaryPart
+	if not root then
+		return
+	end
+	local burst = Instance.new("ParticleEmitter")
+	burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	burst.Color = ColorSequence.new(color)
+	burst.Size = NumberSequence.new(0.8, 0)
+	burst.Speed = NumberRange.new(4, 8)
+	burst.Lifetime = NumberRange.new(0.8, 1.4)
+	burst.SpreadAngle = Vector2.new(180, 180)
+	burst.Rate = 0
+	burst.Parent = root
+	burst:Emit(40)
+	task.delay(2, function()
+		burst:Destroy()
+	end)
+end
+
+function GuardianService.BeginCapture(g)
+	g.Capturing = true
+	g.Busy = false
+	g.Model.Parent = hiddenFolder
+end
+
+function GuardianService.EndCapture(g, caught: boolean)
+	if caught then
+		g.Alive = false
+		guardians[g.Model] = nil
+		g.Model:Destroy()
+		scheduleRespawn(g.Id)
+		return
+	end
+	-- Burst out, furious.
+	g.Capturing = false
+	g.FedFavorite = false
+	g.CalmUntil = 0
+	g.StunUntil = 0
+	g.Resistance = math.min(100, g.Resistance + Config.Catch.BreakFreeResistance)
+	g.EnragedUntil = now() + Config.Catch.EnragedSeconds
+	g.NextAttack = now() + 0.8
+	g.Model.Parent = folder
+	syncAttributes(g)
+	render(g)
+end
+
+function GuardianService.ApplyDraught(g, power: number, player: Player)
+	GuardianService.Weaken(g, power, player, "Draught hit")
+	g.SlowUntil = now() + Config.DraughtSlowSeconds
+	shockwave(g.Position, g.Def.Size, Color3.fromRGB(140, 255, 160))
+end
+
+function GuardianService.Feed(g, isFavorite: boolean)
+	if isFavorite then
+		g.FedFavorite = true
+		g.CalmUntil = now() + Config.Catch.CalmSeconds
+		g.EnragedUntil = 0
+	end
+end
+
+function GuardianService.Start()
+	folder = Instance.new("Folder")
+	folder.Name = "Guardians"
+	folder.Parent = workspace
+
+	effects = Instance.new("Folder")
+	effects.Name = "Effects"
+	effects.Parent = workspace
+
+	hiddenFolder = Instance.new("Folder")
+	hiddenFolder.Name = "CapturingGuardians"
+	hiddenFolder.Parent = ServerStorage
+
+	for _, id in Config.GuardianOrder do
+		for _ = 1, Config.Guardians[id].Count do
+			spawnGuardian(id)
+		end
+	end
+
+	RunService.Heartbeat:Connect(function(dt)
+		for _, g in guardians do
+			if canAct(g) then
+				think(g, dt)
+				checkHazards(g)
+				syncAttributes(g)
+				render(g)
+			end
+		end
+	end)
+
+	-- Hazards hurt players too, so luring a guardian into one is a risk.
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, hazard in WorldBuilder.Hazards do
+				for _, player in playersNear(hazard.Position, hazard.Radius) do
+					damagePlayer(player, Config.HazardPlayerDamage)
+				end
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		lastNotify[player] = nil
+	end)
+end
+
+return GuardianService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">Harvest</string>
+          <string name="Source"><![CDATA[-- Ingredient nodes: hold the prompt to pick, the node regrows after a while.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local PlayerData = require(script.Parent.PlayerData)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+
+local Harvest = {}
+
+local function setVisible(node: Model, visible: boolean)
+	for _, d in node:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Transparency = if visible then 0 else 1
+		elseif d:IsA("ParticleEmitter") or d:IsA("PointLight") or d:IsA("ProximityPrompt") then
+			d.Enabled = visible
+		end
+	end
+end
+
+local function hook(node: Model)
+	local ingredientId = node:GetAttribute("IngredientId") :: string
+	local def = Config.Ingredients[ingredientId]
+	local prompt = node:FindFirstChild("HarvestPrompt", true) :: ProximityPrompt
+	local ready = true
+
+	prompt.Triggered:Connect(function(player)
+		if not ready then
+			return
+		end
+		ready = false
+		setVisible(node, false)
+
+		local amount = if def.Tier <= 1 then 2 else 1
+		PlayerData.Update(player, function(data)
+			data.Ingredients[ingredientId] = (data.Ingredients[ingredientId] or 0) + amount
+			return true
+		end)
+		Remotes.Notify:FireClient(player, string.format("+%d %s", amount, def.Name), "item")
+
+		task.delay(def.Respawn, function()
+			ready = true
+			setVisible(node, true)
+		end)
+	end)
+end
+
+function Harvest.Start()
+	for _, node in WorldBuilder.IngredientNodes do
+		hook(node)
+	end
+end
+
+return Harvest
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">PlayerData</string>
+          <string name="Source"><![CDATA[-- Loads, caches and saves each player's data with DataStoreService.
+-- Every change goes through PlayerData.Update so the client always gets a
+-- fresh snapshot.
+
+local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+
+local STORE_NAME = "BrewGuardians_v1"
+local AUTOSAVE_SECONDS = 120
+local RETRIES = 4
+
+local PlayerData = {}
+
+local store: DataStore? = nil
+local storeOk = pcall(function()
+	store = DataStoreService:GetDataStore(STORE_NAME)
+end)
+
+local cache: { [Player]: any } = {}
+local canSave: { [Player]: boolean } = {}
+local loadedSignal = Instance.new("BindableEvent")
+PlayerData.Loaded = loadedSignal.Event -- (player, data)
+
+local function deepCopy(t)
+	local out = {}
+	for k, v in t do
+		out[k] = if type(v) == "table" then deepCopy(v) else v
+	end
+	return out
+end
+
+local function template()
+	local data = {
+		Version = 1,
+		Coins = Config.StartingData.Coins,
+		Vials = Config.StartingData.Vials,
+		PotLevel = 1,
+		Flasks = {},
+		Draughts = {},
+		Ingredients = {},
+		Guardians = {}, -- array of { Uid, Id, Mutation, CaughtAt }
+		Journal = {}, -- [guardianId] = { Seen, Caught, FavoriteKnown, Tried = {} }
+		PendingCoins = 0,
+		LuckUntil = 0,
+		Purchases = {},
+		Stats = { Throws = 0, Catches = 0, NearMisses = 0, Brews = 0 },
+	}
+	for _, f in Config.Flasks do
+		data.Flasks[f.Id] = Config.StartingData.Flasks[f.Id] or 0
+	end
+	for _, d in Config.Draughts do
+		data.Draughts[d.Id] = 0
+	end
+	for _, id in Config.IngredientOrder do
+		data.Ingredients[id] = Config.StartingData.Ingredients[id] or 0
+	end
+	return data
+end
+
+-- Fill in any keys a newer version of the game added.
+local function reconcile(data, base)
+	for k, v in base do
+		if data[k] == nil then
+			data[k] = if type(v) == "table" then deepCopy(v) else v
+		elseif type(v) == "table" and type(data[k]) == "table" and next(v) ~= nil and #v == 0 then
+			reconcile(data[k], v)
+		end
+	end
+	return data
+end
+
+local function withRetries(fn)
+	local lastErr
+	for attempt = 1, RETRIES do
+		local ok, result = pcall(fn)
+		if ok then
+			return true, result
+		end
+		lastErr = result
+		-- No point retrying when Studio simply has API access turned off.
+		local message = tostring(result)
+		if message:find("StudioAccessToApisNotAllowed") or message:find("403") then
+			break
+		end
+		task.wait(attempt)
+	end
+	return false, lastErr
+end
+
+local function keyFor(player: Player)
+	return "p_" .. player.UserId
+end
+
+function PlayerData.Push(player: Player)
+	local data = cache[player]
+	if data then
+		Remotes.StateUpdate:FireClient(player, data)
+	end
+end
+
+function PlayerData.Get(player: Player)
+	return cache[player]
+end
+
+function PlayerData.WaitFor(player: Player)
+	while player.Parent and not cache[player] do
+		task.wait(0.1)
+	end
+	return cache[player]
+end
+
+-- fn mutates data in place. Return false from fn to signal "no change".
+function PlayerData.Update(player: Player, fn: (any) -> boolean?)
+	local data = cache[player]
+	if not data then
+		return false
+	end
+	local result = fn(data)
+	if result ~= false then
+		PlayerData.Push(player)
+	end
+	return result ~= false
+end
+
+function PlayerData.NewUid(): string
+	return HttpService:GenerateGUID(false)
+end
+
+function PlayerData.Save(player: Player)
+	local data = cache[player]
+	local activeStore = store
+	if not data or not canSave[player] or not activeStore then
+		return
+	end
+	local ok, err = withRetries(function()
+		activeStore:UpdateAsync(keyFor(player), function()
+			return data
+		end)
+	end)
+	if not ok then
+		warn("[PlayerData] save failed for", player.Name, err)
+	end
+end
+
+local function load(player: Player)
+	local data
+	local activeStore = store
+	if activeStore then
+		local ok, result = withRetries(function()
+			return activeStore:GetAsync(keyFor(player))
+		end)
+		if ok then
+			data = result
+			canSave[player] = true
+		else
+			-- Never overwrite a save we failed to read.
+			warn("[PlayerData] load failed, this session will not save:", result)
+			canSave[player] = false
+		end
+	else
+		canSave[player] = false
+	end
+
+	if not player.Parent then
+		return
+	end
+
+	data = reconcile(data or template(), template())
+	cache[player] = data
+
+	if not canSave[player] and RunService:IsStudio() then
+		Remotes.Notify:FireClient(
+			player,
+			"Studio: enable API access to DataStores (Game Settings > Security) to keep progress.",
+			"info"
+		)
+	end
+
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	local coins = Instance.new("IntValue")
+	coins.Name = "Coins"
+	coins.Parent = leaderstats
+	local caught = Instance.new("IntValue")
+	caught.Name = "Caught"
+	caught.Parent = leaderstats
+	leaderstats.Parent = player
+
+	PlayerData.Push(player)
+	loadedSignal:Fire(player, data)
+end
+
+local function syncLeaderstats()
+	for player, data in cache do
+		local stats = player:FindFirstChild("leaderstats")
+		if stats then
+			(stats :: any).Coins.Value = math.floor(data.Coins);
+			(stats :: any).Caught.Value = #data.Guardians
+		end
+	end
+end
+
+function PlayerData.Start()
+	if not storeOk then
+		warn("[PlayerData] DataStoreService unavailable, progress will not save")
+	end
+
+	Remotes.RequestState.OnServerEvent:Connect(PlayerData.Push)
+
+	Players.PlayerAdded:Connect(load)
+	for _, player in Players:GetPlayers() do
+		task.spawn(load, player)
+	end
+
+	Players.PlayerRemoving:Connect(function(player)
+		PlayerData.Save(player)
+		cache[player] = nil
+		canSave[player] = nil
+	end)
+
+	game:BindToClose(function()
+		local pending = 0
+		for player in cache do
+			pending += 1
+			task.spawn(function()
+				PlayerData.Save(player)
+				pending -= 1
+			end)
+		end
+		local started = os.clock()
+		while pending > 0 and os.clock() - started < 25 do
+			task.wait(0.2)
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(AUTOSAVE_SECONDS)
+			for player in cache do
+				task.spawn(PlayerData.Save, player)
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			syncLeaderstats()
+		end
+	end)
+end
+
+return PlayerData
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="13">
+        <Properties>
+          <string name="Name">Plots</string>
+          <string name="Source"><![CDATA[-- Player plots: your cauldron, your caught guardians on display, and the
+-- coin collector they fill.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local GuardianModels = require(script.Parent.GuardianModels)
+local PlayerData = require(script.Parent.PlayerData)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+
+local Plots = {}
+
+type Plot = {
+	Index: number,
+	Owner: Player?,
+	Frame: CFrame,
+	Model: Model,
+	Base: BasePart,
+	Brew: BasePart,
+	OwnerLabel: TextLabel,
+	PendingLabel: TextLabel,
+	Displays: Folder,
+}
+
+local plots: { Plot } = {}
+local byPlayer: { [Player]: Plot } = {}
+
+local DISPLAY_SLOTS = {}
+for row = 0, 2 do
+	for col = 0, 3 do
+		table.insert(DISPLAY_SLOTS, Vector3.new(-18 + col * 12, 0, 4 + row * 10))
+	end
+end
+
+local function local2world(plot: Plot, offset: Vector3): Vector3
+	return (plot.Frame * CFrame.new(offset)).Position
+end
+
+local function label(parent: Instance, size: UDim2, offset: Vector3, color: Color3): TextLabel
+	local gui = Instance.new("BillboardGui")
+	gui.Size = size
+	gui.StudsOffset = offset
+	gui.MaxDistance = 150
+	gui.Parent = parent
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.TextColor3 = color
+	text.TextStrokeTransparency = 0.2
+	text.Text = ""
+	text.Parent = gui
+	return text
+end
+
+local function buildPlot(index: number, parent: Instance): Plot
+	local center = Config.PlotCenter(index)
+	local frame = CFrame.lookAt(center, Vector3.zero)
+	local model = Instance.new("Model")
+	model.Name = "Plot" .. index
+
+	local size = Config.PlotSize
+	local base = WorldBuilder.Part({
+		Name = "Base",
+		Size = Vector3.new(size, 0.6, size),
+		CFrame = frame * CFrame.new(0, 0.3, 0),
+		Color = Color3.fromRGB(150, 130, 105),
+		Material = Enum.Material.WoodPlanks,
+		Parent = model,
+	})
+
+	-- Fence posts around the back
+	for i = -2, 2 do
+		WorldBuilder.Part({
+			Name = "Fence",
+			Size = Vector3.new(size / 5 - 1, 3, 0.6),
+			CFrame = frame * CFrame.new(i * size / 5, 1.8, size / 2 - 0.3),
+			Color = Color3.fromRGB(120, 85, 55),
+			Material = Enum.Material.Wood,
+			Parent = model,
+		})
+	end
+
+	-- Cauldron
+	local potPos = (frame * CFrame.new(0, 0, -14)).Position
+	local pot = WorldBuilder.Disc("Cauldron", potPos + Vector3.new(0, 2.6, 0), 4, 4.4, Color3.fromRGB(45, 45, 55), Enum.Material.Metal, model)
+	local brew = WorldBuilder.Disc("Brew", potPos + Vector3.new(0, 4.85, 0), 3.4, 0.2, Color3.fromRGB(120, 255, 150), Enum.Material.Neon, model)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "BrewPrompt"
+	prompt.ActionText = "Brew"
+	prompt.ObjectText = "Cauldron"
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = pot
+	local bubbles = Instance.new("ParticleEmitter")
+	bubbles.Name = "Bubbles"
+	bubbles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	bubbles.Rate = 6
+	bubbles.Lifetime = NumberRange.new(0.8, 1.4)
+	bubbles.Speed = NumberRange.new(2, 4)
+	bubbles.Size = NumberSequence.new(0.5, 0)
+	bubbles.EmitterDirection = Enum.NormalId.Right
+	bubbles.Color = ColorSequence.new(Color3.fromRGB(150, 255, 170))
+	bubbles.Parent = brew
+
+	-- Collector pad
+	local padPos = (frame * CFrame.new(16, 0, -18)).Position
+	local pad = WorldBuilder.Disc("Collector", padPos + Vector3.new(0, 0.7, 0), 3.5, 0.5, Color3.fromRGB(255, 200, 60), Enum.Material.Neon, model)
+	local collect = Instance.new("ProximityPrompt")
+	collect.Name = "CollectPrompt"
+	collect.ActionText = "Collect"
+	collect.ObjectText = "Coins"
+	collect.MaxActivationDistance = 10
+	collect.RequiresLineOfSight = false
+	collect.Parent = pad
+
+	local signPost = WorldBuilder.Sign(model, (frame * CFrame.new(-8, 0, -size / 2 + 2)).Position, "", Color3.new(1, 1, 1))
+	local ownerLabel = (signPost:FindFirstChildOfClass("BillboardGui") :: BillboardGui):FindFirstChildOfClass("TextLabel") :: TextLabel
+	ownerLabel.Text = "Empty plot"
+
+	local pendingLabel = label(pad, UDim2.fromOffset(160, 40), Vector3.new(0, 3, 0), Color3.fromRGB(255, 230, 120))
+
+	local displays = Instance.new("Folder")
+	displays.Name = "Displays"
+	displays.Parent = model
+
+	model.PrimaryPart = base
+	model.Parent = parent
+
+	local plot: Plot = {
+		Index = index,
+		Owner = nil,
+		Frame = frame,
+		Model = model,
+		Base = base,
+		Brew = brew,
+		OwnerLabel = ownerLabel,
+		PendingLabel = pendingLabel,
+		Displays = displays,
+	}
+
+	prompt.Triggered:Connect(function(player)
+		if plot.Owner ~= player then
+			Remotes.Notify:FireClient(player, "That isn't your cauldron. Yours is on your own plot.", "error")
+			return
+		end
+		Remotes.OpenUI:FireClient(player, "Brew")
+	end)
+
+	collect.Triggered:Connect(function(player)
+		if plot.Owner ~= player then
+			return
+		end
+		local amount = 0
+		PlayerData.Update(player, function(data)
+			amount = math.floor(data.PendingCoins)
+			if amount <= 0 then
+				return false
+			end
+			data.PendingCoins -= amount
+			data.Coins += amount
+			return true
+		end)
+		if amount > 0 then
+			Remotes.Notify:FireClient(player, string.format("+%d coins", amount), "coins")
+		end
+	end)
+
+	return plot
+end
+
+function Plots.Get(player: Player): Plot?
+	return byPlayer[player]
+end
+
+function Plots.SpawnCFrame(player: Player): CFrame?
+	local plot = byPlayer[player]
+	if not plot then
+		return nil
+	end
+	return CFrame.lookAt(local2world(plot, Vector3.new(-14, 4, -20)), local2world(plot, Vector3.new(0, 4, -14)))
+end
+
+function Plots.NearOwnPot(player: Player, range: number): boolean
+	local plot = byPlayer[player]
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not plot or not root then
+		return false
+	end
+	return (root.Position - plot.Brew.Position).Magnitude <= range
+end
+
+function Plots.BrewEffect(player: Player, color: Color3)
+	local plot = byPlayer[player]
+	if not plot then
+		return
+	end
+	local brew = plot.Brew
+	local original = brew.Color
+	brew.Color = color
+	local burst = Instance.new("ParticleEmitter")
+	burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	burst.Color = ColorSequence.new(color)
+	burst.Speed = NumberRange.new(10, 18)
+	burst.Lifetime = NumberRange.new(0.6, 1.2)
+	burst.Size = NumberSequence.new(1, 0)
+	burst.SpreadAngle = Vector2.new(35, 35)
+	burst.EmitterDirection = Enum.NormalId.Right
+	burst.Rate = 0
+	burst.Parent = brew
+	burst:Emit(60)
+	task.delay(2, function()
+		burst:Destroy()
+		TweenService:Create(brew, TweenInfo.new(1), { Color = original }):Play()
+	end)
+end
+
+function Plots.Refresh(player: Player)
+	local plot = byPlayer[player]
+	local data = PlayerData.Get(player)
+	if not plot or not data then
+		return
+	end
+	plot.Displays:ClearAllChildren()
+
+	local list = table.clone(data.Guardians)
+	table.sort(list, function(a, b)
+		return Config.GuardianIncome(a) > Config.GuardianIncome(b)
+	end)
+	for i = 1, math.min(#list, Config.MaxPlotDisplays) do
+		local entry = list[i]
+		if Config.Guardians[entry.Id] then
+			local model = GuardianModels.Build(entry.Id, entry.Mutation)
+			local pos = local2world(plot, DISPLAY_SLOTS[i])
+			model:PivotTo(CFrame.lookAt(pos, Vector3.new(0, pos.Y, 0)))
+			GuardianModels.SitOnGround(model, plot.Base.Position.Y + plot.Base.Size.Y / 2)
+			model:SetAttribute("PlotGuardian", true)
+			model:SetAttribute("DisplayName", Config.GuardianDisplayName(entry))
+			model:SetAttribute("Income", Config.GuardianIncome(entry))
+			model.Parent = plot.Displays
+		end
+	end
+end
+
+local function assign(player: Player)
+	for _, plot in plots do
+		if not plot.Owner then
+			plot.Owner = player
+			byPlayer[player] = plot
+			plot.OwnerLabel.Text = player.DisplayName .. "'s Plot"
+			plot.Base.Color = Color3.fromRGB(175, 150, 115)
+			Plots.Refresh(player)
+			return plot
+		end
+	end
+	Remotes.Notify:FireClient(player, "All plots are taken. You can still catch guardians!", "error")
+	return nil
+end
+
+local function release(player: Player)
+	local plot = byPlayer[player]
+	if not plot then
+		return
+	end
+	plot.Owner = nil
+	byPlayer[player] = nil
+	plot.OwnerLabel.Text = "Empty plot"
+	plot.PendingLabel.Text = ""
+	plot.Base.Color = Color3.fromRGB(150, 130, 105)
+	plot.Displays:ClearAllChildren()
+end
+
+local function onCharacter(player: Player, character: Model)
+	task.wait(0.2)
+	local cf = Plots.SpawnCFrame(player)
+	if cf and character.Parent then
+		character:PivotTo(cf)
+	end
+end
+
+function Plots.Start()
+	local folder = Instance.new("Folder")
+	folder.Name = "Plots"
+	folder.Parent = workspace
+	for i = 1, Config.PlotCount do
+		table.insert(plots, buildPlot(i, folder))
+	end
+
+	PlayerData.Loaded:Connect(function(player)
+		assign(player)
+		if player.Character then
+			task.spawn(onCharacter, player, player.Character)
+		end
+	end)
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(function(character)
+			onCharacter(player, character)
+		end)
+	end)
+	for _, player in Players:GetPlayers() do
+		player.CharacterAdded:Connect(function(character)
+			onCharacter(player, character)
+		end)
+	end
+	Players.PlayerRemoving:Connect(release)
+
+	-- Income
+	task.spawn(function()
+		while true do
+			task.wait(Config.IncomeTickSeconds)
+			for player, plot in byPlayer do
+				local data = PlayerData.Get(player)
+				if data then
+					local perSecond = 0
+					for _, entry in data.Guardians do
+						perSecond += Config.GuardianIncome(entry)
+					end
+					local cap = perSecond * Config.MaxPendingIncomeSeconds
+					data.PendingCoins = math.min(data.PendingCoins + perSecond * Config.IncomeTickSeconds, cap)
+					plot.PendingLabel.Text = if perSecond > 0
+						then string.format("%d coins  (+%d/s)", math.floor(data.PendingCoins), math.floor(perSecond))
+						else "Catch guardians to earn"
+				end
+			end
+		end
+	end)
+end
+
+return Plots
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="14">
+        <Properties>
+          <string name="Name">WorldBuilder</string>
+          <string name="Source"><![CDATA[-- Builds the whole map out of parts at server start, so the place runs with
+-- no uploaded assets. Replace any of it with hand-built models later.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local WorldBuilder = {}
+
+WorldBuilder.Hazards = {} :: { { Position: Vector3, Radius: number, Zone: string, Name: string, Part: BasePart } }
+WorldBuilder.IngredientNodes = {} :: { Model }
+WorldBuilder.Folder = nil :: Folder?
+WorldBuilder.ShopPrompt = nil :: ProximityPrompt?
+
+local rng = Random.new(20261011)
+
+local function part(props): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.SmoothPlastic
+	for k, v in props do
+		(p :: any)[k] = v
+	end
+	return p
+end
+
+WorldBuilder.Part = part
+
+local function disc(name, center: Vector3, radius: number, height: number, color: Color3, material, parent)
+	return part({
+		Name = name,
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(height, radius * 2, radius * 2),
+		CFrame = CFrame.new(center) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+end
+
+WorldBuilder.Disc = disc
+
+local function sign(parent: Instance, position: Vector3, text: string, color: Color3)
+	local post = part({
+		Name = "Sign",
+		Size = Vector3.new(1, 8, 1),
+		CFrame = CFrame.new(position + Vector3.new(0, 4, 0)),
+		Color = Color3.fromRGB(110, 80, 50),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(260, 60)
+	gui.StudsOffset = Vector3.new(0, 6, 0)
+	gui.MaxDistance = 250
+	gui.AlwaysOnTop = false
+	gui.Parent = post
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.Text = text
+	label.TextColor3 = color
+	label.TextStrokeTransparency = 0.2
+	label.Parent = gui
+	return post
+end
+
+WorldBuilder.Sign = sign
+
+-- Random point in a zone that keeps clear of the given points.
+local function scatter(center: Vector3, radius: number, avoid: { Vector3 }, minGap: number): Vector3
+	local best = center
+	for _ = 1, 40 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local r = math.sqrt(rng:NextNumber()) * radius
+		local candidate = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+		local ok = true
+		for _, p in avoid do
+			if (p - candidate).Magnitude < minGap then
+				ok = false
+				break
+			end
+		end
+		best = candidate
+		if ok then
+			break
+		end
+	end
+	return best
+end
+
+local function buildDecor(kind: string, position: Vector3, parent: Instance)
+	local model = Instance.new("Model")
+	model.Name = kind
+	if kind == "Tree" then
+		local h = rng:NextNumber(10, 18)
+		part({
+			Size = Vector3.new(2.5, h, 2.5),
+			CFrame = CFrame.new(position + Vector3.new(0, h / 2, 0)),
+			Color = Color3.fromRGB(105, 75, 50),
+			Material = Enum.Material.Wood,
+			Parent = model,
+		})
+		part({
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * rng:NextNumber(9, 13),
+			CFrame = CFrame.new(position + Vector3.new(0, h + 2, 0)),
+			Color = Color3.fromRGB(70, 150, 70),
+			Material = Enum.Material.Grass,
+			Parent = model,
+		})
+	elseif kind == "Rock" then
+		local s = rng:NextNumber(5, 12)
+		part({
+			Size = Vector3.new(s, s * 0.8, s * 1.1),
+			CFrame = CFrame.new(position + Vector3.new(0, s * 0.3, 0))
+				* CFrame.Angles(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0, 6), rng:NextNumber(-0.3, 0.3)),
+			Color = Color3.fromRGB(55, 45, 45),
+			Material = Enum.Material.Basalt,
+			Parent = model,
+		})
+	else
+		local h = rng:NextNumber(6, 14)
+		part({
+			Size = Vector3.new(2.5, h, 2.5),
+			CFrame = CFrame.new(position + Vector3.new(0, h / 2 - 0.5, 0))
+				* CFrame.Angles(rng:NextNumber(-0.35, 0.35), rng:NextNumber(0, 6), rng:NextNumber(-0.35, 0.35)),
+			Color = Color3.fromRGB(170, 220, 255),
+			Material = Enum.Material.Glass,
+			Transparency = 0.25,
+			Parent = model,
+		})
+	end
+	model.Parent = parent
+	return model
+end
+
+local function buildHazard(zoneId: string, zone, position: Vector3, parent: Instance)
+	local r = Config.HazardRadius
+	local base = disc(zone.HazardName, position + Vector3.new(0, 0.15, 0), r, 0.4, zone.HazardColor, nil, parent)
+	base.CanCollide = false
+	base:SetAttribute("Hazard", true)
+	base:SetAttribute("Zone", zoneId)
+
+	if zoneId == "Caldera" then
+		base.Material = Enum.Material.Neon
+		local fire = Instance.new("Fire")
+		fire.Size = 8
+		fire.Heat = 12
+		fire.Parent = base
+	else
+		for i = 1, 7 do
+			local a = (i / 7) * math.pi * 2
+			local d = rng:NextNumber(1, r - 1.5)
+			local spikePos = position + Vector3.new(math.cos(a) * d, 1.5, math.sin(a) * d)
+			local spike = part({
+				Name = "Spike",
+				Shape = Enum.PartType.Wedge,
+				Size = Vector3.new(1.2, 3, 1.2),
+				CFrame = CFrame.new(spikePos) * CFrame.Angles(0, a, 0),
+				Color = zone.HazardColor,
+				Material = if zoneId == "Frost" then Enum.Material.Ice else Enum.Material.Grass,
+				CanCollide = false,
+				Parent = base,
+			})
+			spike.CastShadow = false
+		end
+	end
+
+	table.insert(WorldBuilder.Hazards, {
+		Position = position,
+		Radius = r,
+		Zone = zoneId,
+		Name = zone.HazardName,
+		Part = base,
+	})
+end
+
+local function buildIngredientNode(ingredientId: string, position: Vector3, parent: Instance)
+	local def = Config.Ingredients[ingredientId]
+	local model = Instance.new("Model")
+	model.Name = "Node_" .. ingredientId
+	model:SetAttribute("IngredientId", ingredientId)
+
+	local stem = part({
+		Name = "Stem",
+		Size = Vector3.new(0.4, 2.2, 0.4),
+		CFrame = CFrame.new(position + Vector3.new(0, 1.1, 0)),
+		Color = Color3.fromRGB(70, 130, 60),
+		CanCollide = false,
+		Parent = model,
+	})
+	local bloom = part({
+		Name = "Bloom",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * (1.4 + def.Tier * 0.35),
+		CFrame = CFrame.new(position + Vector3.new(0, 2.6, 0)),
+		Color = def.Color,
+		Material = if def.Tier >= 3 then Enum.Material.Neon else Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Parent = model,
+	})
+	model.PrimaryPart = stem
+
+	local light = Instance.new("PointLight")
+	light.Color = def.Color
+	light.Range = 6 + def.Tier * 2
+	light.Brightness = 0.8
+	light.Parent = bloom
+
+	local sparkle = Instance.new("ParticleEmitter")
+	sparkle.Name = "Sparkle"
+	sparkle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	sparkle.Color = ColorSequence.new(def.Color)
+	sparkle.Size = NumberSequence.new(0.3, 0)
+	sparkle.Lifetime = NumberRange.new(0.6, 1.2)
+	sparkle.Rate = def.Tier * 2
+	sparkle.Speed = NumberRange.new(1, 2)
+	sparkle.SpreadAngle = Vector2.new(180, 180)
+	sparkle.Parent = bloom
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "HarvestPrompt"
+	prompt.ActionText = "Harvest"
+	prompt.ObjectText = def.Name
+	prompt.HoldDuration = 0.3 + def.Tier * 0.25
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = bloom
+
+	model.Parent = parent
+	table.insert(WorldBuilder.IngredientNodes, model)
+end
+
+local function buildZone(zoneId: string, folder: Folder)
+	local zone = Config.Zones[zoneId]
+	local center = Config.ZoneCenter(zoneId)
+	local zoneFolder = Instance.new("Folder")
+	zoneFolder.Name = zoneId
+	zoneFolder.Parent = folder
+
+	local floorMaterial = if zoneId == "Frost"
+		then Enum.Material.Snow
+		elseif zoneId == "Caldera" then Enum.Material.Slate
+		else Enum.Material.Grass
+	disc("Floor", center + Vector3.new(0, 0.05, 0), zone.Radius + 10, 0.3, zone.Floor, floorMaterial, zoneFolder)
+
+	local inward = (Vector3.zero - center).Unit
+	local side = Vector3.new(-inward.Z, 0, inward.X)
+	sign(zoneFolder, center + inward * (zone.Radius + 4) + side * 14, zone.Name, Color3.fromRGB(255, 255, 255))
+
+	-- Decor ring around the edge so the zone reads as a place.
+	for i = 1, 26 do
+		local a = (i / 26) * math.pi * 2 + rng:NextNumber(-0.1, 0.1)
+		local r = zone.Radius + rng:NextNumber(2, 14)
+		local pos = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+		-- leave a gap where the path comes in
+		local toHub = (Vector3.zero - center).Unit
+		local dir = (pos - center).Unit
+		if dir:Dot(toHub) < 0.93 then
+			buildDecor(zone.DecorKind, pos, zoneFolder)
+		end
+	end
+
+	local taken = {}
+	local hazardFolder = Instance.new("Folder")
+	hazardFolder.Name = "Hazards"
+	hazardFolder.Parent = zoneFolder
+	for _ = 1, zone.Hazards do
+		local pos = scatter(center, zone.Radius - 15, taken, 30)
+		table.insert(taken, pos)
+		buildHazard(zoneId, zone, pos, hazardFolder)
+	end
+
+	local nodeFolder = Instance.new("Folder")
+	nodeFolder.Name = "Ingredients"
+	nodeFolder.Parent = zoneFolder
+	for _, ingredientId in Config.IngredientOrder do
+		local count = Config.Ingredients[ingredientId].Zones[zoneId]
+		for _ = 1, count or 0 do
+			local pos = scatter(center, zone.Radius - 6, taken, 14)
+			table.insert(taken, pos)
+			buildIngredientNode(ingredientId, pos, nodeFolder)
+		end
+	end
+end
+
+local function buildPath(fromRadius: number, angleDeg: number, toDistance: number, folder: Folder)
+	local a = math.rad(angleDeg)
+	local dir = Vector3.new(math.cos(a), 0, math.sin(a))
+	local length = toDistance - fromRadius
+	local mid = dir * (fromRadius + length / 2)
+	part({
+		Name = "Path",
+		Size = Vector3.new(18, 0.3, length + 4),
+		CFrame = CFrame.lookAt(mid + Vector3.new(0, 0.1, 0), mid + dir + Vector3.new(0, 0.1, 0)),
+		Color = Color3.fromRGB(200, 180, 140),
+		Material = Enum.Material.Pebble,
+		Parent = folder,
+	})
+end
+
+local function buildHub(folder: Folder)
+	local hub = Instance.new("Folder")
+	hub.Name = "Hub"
+	hub.Parent = folder
+
+	disc("HubFloor", Vector3.new(0, 0.1, 0), Config.HubRadius, 0.4, Color3.fromRGB(220, 205, 175), Enum.Material.Cobblestone, hub)
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Anchored = true
+	spawn.Size = Vector3.new(10, 1, 10)
+	spawn.CFrame = CFrame.new(0, 0.5, 20)
+	spawn.Color = Color3.fromRGB(180, 140, 255)
+	spawn.Material = Enum.Material.Neon
+	spawn.Transparency = 0.4
+	spawn.Duration = 0
+	spawn.Parent = hub
+
+	-- Giant decorative cauldron in the middle.
+	disc("Cauldron", Vector3.new(0, 4, 0), 9, 8, Color3.fromRGB(40, 40, 50), Enum.Material.Metal, hub)
+	local brew = disc("Brew", Vector3.new(0, 8.1, 0), 8, 0.3, Color3.fromRGB(150, 90, 255), Enum.Material.Neon, hub)
+	local bubbles = Instance.new("ParticleEmitter")
+	bubbles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	bubbles.Color = ColorSequence.new(Color3.fromRGB(200, 150, 255))
+	bubbles.Rate = 15
+	bubbles.Lifetime = NumberRange.new(1, 2)
+	bubbles.Speed = NumberRange.new(3, 6)
+	bubbles.Size = NumberSequence.new(0.8, 0)
+	bubbles.EmitterDirection = Enum.NormalId.Right
+	bubbles.Parent = brew
+
+	-- Shop stall
+	local stall = Instance.new("Model")
+	stall.Name = "ShopStall"
+	local counter = part({
+		Name = "Counter",
+		Size = Vector3.new(14, 4, 4),
+		CFrame = CFrame.new(0, 2, -40),
+		Color = Color3.fromRGB(150, 100, 60),
+		Material = Enum.Material.WoodPlanks,
+		Parent = stall,
+	})
+	part({
+		Name = "Awning",
+		Size = Vector3.new(16, 0.6, 8),
+		CFrame = CFrame.new(0, 10, -41) * CFrame.Angles(math.rad(-12), 0, 0),
+		Color = Color3.fromRGB(200, 70, 90),
+		Parent = stall,
+	})
+	for _, x in { -7, 7 } do
+		part({
+			Size = Vector3.new(0.8, 10, 0.8),
+			CFrame = CFrame.new(x, 5, -42),
+			Color = Color3.fromRGB(110, 80, 50),
+			Material = Enum.Material.Wood,
+			Parent = stall,
+		})
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Shop"
+	prompt.ObjectText = "Vials & Cauldrons"
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = counter
+	stall.Parent = hub
+	WorldBuilder.ShopPrompt = prompt
+	sign(hub, Vector3.new(10, 0, -38), "Shop", Color3.fromRGB(255, 220, 120))
+
+	for _, zoneId in Config.ZoneOrder do
+		local zone = Config.Zones[zoneId]
+		local a = math.rad(zone.Angle)
+		local pos = Vector3.new(math.cos(a), 0, math.sin(a)) * (Config.HubRadius - 6)
+		sign(hub, pos + Vector3.new(math.sin(a), 0, -math.cos(a)) * 12, "→ " .. zone.Name, Color3.fromRGB(255, 255, 255))
+	end
+end
+
+function WorldBuilder.Build()
+	local folder = Instance.new("Folder")
+	folder.Name = "World"
+	WorldBuilder.Folder = folder
+
+	local ground = part({
+		Name = "Ground",
+		Size = Vector3.new(2048, 4, 2048),
+		CFrame = CFrame.new(0, -2, 0),
+		Color = Color3.fromRGB(120, 175, 95),
+		Material = Enum.Material.Grass,
+		Parent = folder,
+	})
+	ground.Locked = true
+
+	buildHub(folder)
+	for _, zoneId in Config.ZoneOrder do
+		local zone = Config.Zones[zoneId]
+		buildPath(Config.HubRadius - 2, zone.Angle, zone.Distance - zone.Radius, folder)
+		buildZone(zoneId, folder)
+	end
+
+	folder.Parent = workspace
+	return folder
+end
+
+return WorldBuilder
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="15">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="16">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="17">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[-- Brew Guardians client entry point.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local CaptureFX = require(script.CaptureFX)
+local Hud = require(script.Hud)
+local Menus = require(script.Menus)
+local State = require(script.State)
+local Targeting = require(script.Targeting)
+
+Hud.Init()
+Menus.Init()
+CaptureFX.Init()
+Hud.OpenMenu = Menus.Open
+
+Remotes.StateUpdate.OnClientEvent:Connect(State.Set)
+Remotes.Notify.OnClientEvent:Connect(Hud.Toast)
+Remotes.Announce.OnClientEvent:Connect(Hud.Announce)
+Remotes.OpenUI.OnClientEvent:Connect(Menus.Open)
+Remotes.RequestState:FireServer()
+
+task.spawn(Targeting.Init)
+
+-- First-time players get the how-to-play page.
+task.delay(2, function()
+	local data = State.Data
+	if data and data.Stats.Throws == 0 then
+		Menus.Open("Help")
+	end
+end)
+]]></string>
+        </Properties>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">CaptureFX</string>
+            <string name="Source"><![CDATA[-- The throw arc and the shake moment. The server decides the outcome up
+-- front and sends how many shakes pass; this plays it back with rising
+-- tension: each shake wobbles harder, sounds higher and fills one more dot,
+-- then the flask either locks with a flash or shatters.
+
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local CatchMath = require(ReplicatedStorage.Shared.CatchMath)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Hud = require(script.Parent.Hud)
+local UI = require(script.Parent.UI)
+
+local player = Players.LocalPlayer
+
+local CaptureFX = {}
+
+local fxFolder: Folder
+
+----------------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------------
+local function sound(id: string, parent: Instance, speed: number?, volume: number?)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.PlaybackSpeed = speed or 1
+	s.Volume = volume or 0.7
+	s.RollOffMaxDistance = 150
+	s.Parent = parent
+	s:Play()
+	Debris:AddItem(s, 4)
+end
+
+local function newPart(props): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.SmoothPlastic
+	for k, v in props do
+		(p :: any)[k] = v
+	end
+	p.Parent = props.Parent or fxFolder
+	return p
+end
+
+local function sparkles(parent: Instance, color: Color3, amount: number, speed: number)
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	e.Color = ColorSequence.new(color)
+	e.Size = NumberSequence.new(0.6, 0)
+	e.Speed = NumberRange.new(speed * 0.5, speed)
+	e.Lifetime = NumberRange.new(0.5, 1)
+	e.SpreadAngle = Vector2.new(180, 180)
+	e.Rate = 0
+	e.LightEmission = 1
+	e.Parent = parent
+	e:Emit(amount)
+	Debris:AddItem(e, 2)
+end
+
+local function ring(position: Vector3, color: Color3, size: number)
+	local p = newPart({
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.2, 1, 1),
+		CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = color,
+		Material = Enum.Material.Neon,
+		Transparency = 0.2,
+	})
+	local t = TweenService:Create(p, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.2, size, size),
+		Transparency = 1,
+	})
+	t:Play()
+	Debris:AddItem(p, 0.5)
+end
+
+local function cameraShake(intensity: number, duration: number)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	task.spawn(function()
+		local t = 0
+		while t < duration do
+			local fade = 1 - t / duration
+			humanoid.CameraOffset = Vector3.new(
+				(math.random() - 0.5) * intensity * fade,
+				(math.random() - 0.5) * intensity * fade,
+				0
+			)
+			t += RunService.RenderStepped:Wait()
+		end
+		humanoid.CameraOffset = Vector3.zero
+	end)
+end
+
+-- A little flask: round body, neck and cork.
+local function buildFlask(color: Color3, scale: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Flask"
+	local bodyPart = newPart({
+		Name = "Body",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * 2 * scale,
+		Color = color,
+		Material = Enum.Material.Glass,
+		Transparency = 0.15,
+		Parent = model,
+	})
+	newPart({
+		Name = "Core",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * 1.3 * scale,
+		Color = color,
+		Material = Enum.Material.Neon,
+		Parent = model,
+	})
+	newPart({
+		Name = "Neck",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.9 * scale, 0.7 * scale, 0.7 * scale),
+		CFrame = CFrame.new(0, 1.2 * scale, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = color,
+		Material = Enum.Material.Glass,
+		Transparency = 0.15,
+		Parent = model,
+	})
+	newPart({
+		Name = "Cork",
+		Size = Vector3.new(0.6, 0.4, 0.6) * scale,
+		CFrame = CFrame.new(0, 1.75 * scale, 0),
+		Color = Color3.fromRGB(150, 105, 60),
+		Material = Enum.Material.Wood,
+		Parent = model,
+	})
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 10
+	light.Brightness = 2
+	light.Parent = bodyPart
+	model.PrimaryPart = bodyPart
+	model.Parent = fxFolder
+	return model
+end
+
+-- Pivot a flask so the bottom of the body touches `ground`, tilted by `tilt`.
+-- Rocks around the bottom of the flask, not its centre.
+local function placeFlask(flask: Model, ground: Vector3, tilt: number, scale: number)
+	flask:PivotTo(CFrame.new(ground) * CFrame.Angles(0, 0, tilt) * CFrame.new(0, scale, 0))
+end
+
+local function flaskColor(flaskId: string): Color3
+	local f = Config.GetFlask(flaskId)
+	return f and f.Color or Color3.new(1, 1, 1)
+end
+
+----------------------------------------------------------------------
+-- Throw arc
+----------------------------------------------------------------------
+local function onThrowVisual(from: Vector3, target: Instance?, color: Color3, flight: number)
+	if typeof(target) ~= "Instance" or not target:IsA("Model") then
+		return
+	end
+	local model = target :: Model
+	local flask = buildFlask(color, 0.6)
+	sound(Config.Sounds.Throw, flask.PrimaryPart :: BasePart, 1.1, 0.6)
+	local trail = Instance.new("Trail")
+	local a0 = Instance.new("Attachment")
+	a0.Position = Vector3.new(0, 0.4, 0)
+	local a1 = Instance.new("Attachment")
+	a1.Position = Vector3.new(0, -0.4, 0)
+	a0.Parent = flask.PrimaryPart
+	a1.Parent = flask.PrimaryPart
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Color = ColorSequence.new(color)
+	trail.Transparency = NumberSequence.new(0.2, 1)
+	trail.Lifetime = 0.3
+	trail.LightEmission = 1
+	trail.Parent = flask.PrimaryPart
+
+	local t = 0
+	local last = model:GetPivot().Position
+	while t < flight do
+		t += RunService.RenderStepped:Wait()
+		local alpha = math.min(t / flight, 1)
+		if model.Parent then
+			last = model:GetPivot().Position
+		end
+		local height = math.max((from - last).Magnitude * 0.25, 4)
+		local pos = from:Lerp(last, alpha) + Vector3.new(0, math.sin(alpha * math.pi) * height, 0)
+		flask:PivotTo(CFrame.new(pos) * CFrame.Angles(alpha * 12, alpha * 6, 0))
+	end
+	flask:Destroy()
+end
+
+----------------------------------------------------------------------
+-- The shake sequence
+----------------------------------------------------------------------
+local function dotsGui(adornee: BasePart): (BillboardGui, { Frame })
+	local gui = UI.make("BillboardGui", {
+		Adornee = adornee,
+		Size = UDim2.fromOffset(150, 44),
+		StudsOffsetWorldSpace = Vector3.new(0, 4.5, 0),
+		AlwaysOnTop = true,
+		MaxDistance = 160,
+		Parent = player:WaitForChild("PlayerGui"),
+	})
+	local holder = UI.make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = gui })
+	local layout = UI.list(holder, 10, true)
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	local dots = {}
+	for i = 1, CatchMath.Shakes do
+		table.insert(dots, UI.make("Frame", {
+			Size = UDim2.fromOffset(28, 28),
+			BackgroundColor3 = Color3.fromRGB(40, 35, 55),
+			Corner = 14,
+			Stroke = Color3.new(1, 1, 1),
+			LayoutOrder = i,
+			Parent = holder,
+		}))
+	end
+	return gui, dots
+end
+
+local function wobble(flask: Model, ground: Vector3, scale: number, amplitude: number, duration: number)
+	-- Three half-swings that settle back to upright.
+	local t = 0
+	while t < duration do
+		t += RunService.RenderStepped:Wait()
+		local alpha = math.min(t / duration, 1)
+		local tilt = math.sin(alpha * math.pi * 3) * amplitude * (1 - alpha * 0.4)
+		placeFlask(flask, ground, tilt, scale)
+	end
+	placeFlask(flask, ground, 0, scale)
+end
+
+local function shatter(flask: Model, color: Color3)
+	local center = flask:GetPivot().Position
+	for _, part in flask:GetDescendants() do
+		if part:IsA("BasePart") then
+			part:Destroy()
+		end
+	end
+	for _ = 1, 10 do
+		local shard = newPart({
+			Shape = Enum.PartType.Wedge,
+			Size = Vector3.new(0.2, math.random() * 0.6 + 0.3, math.random() * 0.6 + 0.3),
+			CFrame = CFrame.new(center) * CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6),
+			Color = color,
+			Material = Enum.Material.Glass,
+			Transparency = 0.2,
+		})
+		shard.Anchored = false
+		shard.CanCollide = true
+		shard.AssemblyLinearVelocity = Vector3.new(math.random(-25, 25), math.random(15, 35), math.random(-25, 25))
+		shard.AssemblyAngularVelocity = Vector3.new(math.random(-20, 20), math.random(-20, 20), math.random(-20, 20))
+		Debris:AddItem(shard, 2.5)
+	end
+end
+
+local function onCaptureSequence(info)
+	local ground: Vector3 = info.Position
+	local shakes: number = info.Shakes
+	local isMine = info.ThrowerUserId == player.UserId
+	local def = Config.Guardians[info.GuardianId]
+	local color = flaskColor(info.FlaskId)
+	local accent = def and def.Accent or Color3.new(1, 1, 1)
+	local scale = 1.1
+
+	-- Only the thrower and people nearby need the full show.
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not isMine and (not root or (root.Position - ground).Magnitude > 200) then
+		return
+	end
+
+	local flask = buildFlask(color, scale)
+	local body = flask.PrimaryPart :: BasePart
+
+	-- 1) Swallow: a bright sphere the size of the guardian collapses into the flask.
+	local size = def and def.Size * 1.3 or 5
+	local orb = newPart({
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * size,
+		CFrame = CFrame.new(ground + Vector3.new(0, size / 2, 0)),
+		Color = accent,
+		Material = Enum.Material.Neon,
+		Transparency = 0.1,
+	})
+	TweenService:Create(orb, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Size = Vector3.one * 0.5,
+		CFrame = CFrame.new(ground + Vector3.new(0, scale, 0)),
+		Transparency = 0.6,
+	}):Play()
+	Debris:AddItem(orb, 0.4)
+
+	-- Flask drops in with a little bounce.
+	local dropStart = os.clock()
+	while os.clock() - dropStart < 0.3 do
+		local a = (os.clock() - dropStart) / 0.3
+		local bounce = math.abs(math.sin(a * math.pi * 1.5)) * (1 - a) * 3
+		flask:PivotTo(CFrame.new(ground + Vector3.new(0, scale + bounce + (1 - a) * 4, 0)))
+		RunService.RenderStepped:Wait()
+	end
+	placeFlask(flask, ground, 0, scale)
+	ring(ground + Vector3.new(0, 0.3, 0), color, 10)
+	sparkles(body, accent, 25, 10)
+	if isMine then
+		cameraShake(0.4, 0.2)
+	end
+
+	local gui, dots = dotsGui(body)
+	task.wait(math.max(CatchMath.LandTime - 0.3, 0))
+
+	-- 2) Shakes. A burst happens partway through shake number shakes + 1.
+	for i = 1, CatchMath.Shakes do
+		local amplitude = math.rad(14 + i * 9)
+		local pitch = 0.9 + i * 0.18
+		sound(Config.Sounds.Shake, body, pitch, 0.6 + i * 0.15)
+		if i > shakes then
+			-- Breaking free: a violent half-wobble, then glass everywhere.
+			wobble(flask, ground, scale, amplitude * 1.6, CatchMath.ShakeInterval * 0.35)
+			local nearMiss = i == CatchMath.Shakes
+			dots[i].BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+			sound(Config.Sounds.Burst, body, 0.8, 1)
+			ring(ground + Vector3.new(0, 0.5, 0), Color3.fromRGB(255, 80, 60), 18)
+			shatter(flask, color)
+			local burstAnchor = newPart({ Transparency = 1, Size = Vector3.one, CFrame = CFrame.new(ground + Vector3.new(0, 2, 0)) })
+			sparkles(burstAnchor, Color3.fromRGB(255, 90, 70), 50, 25)
+			Debris:AddItem(burstAnchor, 2)
+			if isMine then
+				cameraShake(if nearMiss then 1.6 else 1, 0.45)
+				Hud.Flash(Color3.fromRGB(255, 60, 60), if nearMiss then 0.45 else 0.3)
+				Hud.BigText(if nearMiss then "SO CLOSE!" else "It broke free!", Color3.fromRGB(255, 110, 90))
+			end
+			task.wait(0.6)
+			gui:Destroy()
+			flask:Destroy()
+			return
+		end
+
+		wobble(flask, ground, scale, amplitude, CatchMath.ShakeInterval * 0.55)
+		-- Shake survived: light up a dot and pulse.
+		local dot = dots[i]
+		dot.BackgroundColor3 = Color3.fromRGB(255, 220, 90)
+		TweenService:Create(dot, TweenInfo.new(0.15, Enum.EasingStyle.Back), { Size = UDim2.fromOffset(34, 34) }):Play()
+		ring(ground + Vector3.new(0, 0.3, 0), accent, 6 + i * 4)
+		sparkles(body, accent, 8 * i, 6 + i * 3)
+		if isMine then
+			cameraShake(0.25 + i * 0.25, 0.2)
+		end
+		task.wait(CatchMath.ShakeInterval * 0.45)
+	end
+
+	-- 3) Click. Locked.
+	sound(Config.Sounds.Lock, body, 1.2, 1)
+	for _, d in dots do
+		d.BackgroundColor3 = Color3.fromRGB(120, 255, 140)
+	end
+	ring(ground + Vector3.new(0, 0.5, 0), Color3.fromRGB(255, 240, 150), 24)
+	sparkles(body, Color3.fromRGB(255, 230, 120), 80, 22)
+	local core = flask:FindFirstChild("Core") :: BasePart?
+	if core then
+		core.Color = Color3.new(1, 1, 1)
+	end
+	if isMine then
+		Hud.Flash(Color3.new(1, 1, 1), 0.65)
+		Hud.BigText("GOTCHA!", Color3.fromRGB(255, 225, 90), 1.8)
+		cameraShake(0.6, 0.3)
+	end
+	task.wait(CatchMath.ResultTime)
+	gui:Destroy()
+
+	-- Flask zips off toward the thrower's plot (upwards and away).
+	for _, part in flask:GetDescendants() do
+		if part:IsA("BasePart") then
+			TweenService:Create(part, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+				Size = part.Size * 0.05,
+				Position = part.Position + Vector3.new(0, 12, 0),
+			}):Play()
+		end
+	end
+	Debris:AddItem(flask, 0.6)
+end
+
+----------------------------------------------------------------------
+-- Plot guardians idle-bob locally so displays feel alive.
+----------------------------------------------------------------------
+local function bobPlotGuardians()
+	local plots = workspace:WaitForChild("Plots", 30)
+	if not plots then
+		return
+	end
+	local base: { [Model]: CFrame } = {}
+	RunService.RenderStepped:Connect(function()
+		local t = os.clock()
+		for _, plot in plots:GetChildren() do
+			local displays = plot:FindFirstChild("Displays")
+			if displays then
+				for i, model in displays:GetChildren() do
+					if model:IsA("Model") and model.PrimaryPart then
+						if not base[model] then
+							base[model] = model:GetPivot()
+							model.Destroying:Once(function()
+								base[model] = nil
+							end)
+						end
+						local offset = math.abs(math.sin(t * 2 + i)) * 0.6
+						model:PivotTo(base[model] * CFrame.new(0, offset, 0))
+					end
+				end
+			end
+		end
+	end)
+end
+
+function CaptureFX.Init()
+	fxFolder = Instance.new("Folder")
+	fxFolder.Name = "LocalFX"
+	fxFolder.Parent = workspace
+
+	Remotes.ThrowVisual.OnClientEvent:Connect(function(...)
+		task.spawn(onThrowVisual, ...)
+	end)
+	Remotes.CaptureSequence.OnClientEvent:Connect(function(info)
+		task.spawn(onCaptureSequence, info)
+	end)
+	task.spawn(bobPlotGuardians)
+end
+
+return CaptureFX
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
+            <string name="Name">Hud</string>
+            <string name="Source"><![CDATA[-- Always-on HUD: coins, menu buttons, the action bar, toasts and banners.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+
+local T = UI.Theme
+
+local Hud = {}
+Hud.OpenMenu = nil :: ((name: string) -> ())?
+
+local gui: ScreenGui
+local coinsLabel: TextLabel
+local vialsLabel: TextLabel
+local luckLabel: TextLabel
+local toastHolder: Frame
+local slotButtons: { { Kind: string, Id: string, Button: TextButton, Count: TextLabel } } = {}
+local feedPicker: Frame
+
+local KIND_COLORS = {
+	item = Color3.fromRGB(120, 200, 255),
+	coins = T.Gold,
+	weaken = Color3.fromRGB(255, 160, 80),
+	favorite = Color3.fromRGB(255, 130, 210),
+	catch = T.Good,
+	nearmiss = Color3.fromRGB(255, 120, 60),
+	fail = T.Bad,
+	error = T.Bad,
+	brew = Color3.fromRGB(160, 255, 180),
+	info = T.Text,
+}
+
+----------------------------------------------------------------------
+-- Toasts, banners, flashes
+----------------------------------------------------------------------
+function Hud.Toast(text: string, kind: string?)
+	local color = KIND_COLORS[kind or "info"] or T.Text
+	local toast = UI.make("Frame", {
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = T.Panel,
+		BackgroundTransparency = 0.15,
+		Corner = 8,
+		Stroke = color,
+		Parent = toastHolder,
+	}, {
+		UI.text({
+			Text = text,
+			Size = UDim2.new(1, -16, 1, -8),
+			Position = UDim2.fromOffset(8, 4),
+			TextColor3 = color,
+			Font = T.Body,
+		}),
+	})
+	task.delay(3.5, function()
+		local label = toast:FindFirstChildOfClass("TextLabel")
+		TweenService:Create(toast, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+		if label then
+			TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+		end
+		task.wait(0.45)
+		toast:Destroy()
+	end)
+	-- Keep the stack short.
+	local toasts = {}
+	for _, child in toastHolder:GetChildren() do
+		if child:IsA("Frame") then
+			table.insert(toasts, child)
+		end
+	end
+	if #toasts > 5 then
+		toasts[1]:Destroy()
+	end
+end
+
+function Hud.Announce(text: string)
+	local banner = UI.make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, -80),
+		Size = UDim2.fromOffset(620, 56),
+		BackgroundColor3 = Color3.fromRGB(60, 40, 10),
+		Corner = 12,
+		Stroke = T.Gold,
+		Parent = gui,
+	}, {
+		UI.text({ Text = text, Size = UDim2.new(1, -20, 1, -12), Position = UDim2.fromOffset(10, 6), TextColor3 = T.Gold }),
+	})
+	TweenService:Create(banner, TweenInfo.new(0.4, Enum.EasingStyle.Back), { Position = UDim2.new(0.5, 0, 0, 70) }):Play()
+	task.delay(5, function()
+		TweenService:Create(banner, TweenInfo.new(0.3), { Position = UDim2.new(0.5, 0, 0, -80) }):Play()
+		task.wait(0.35)
+		banner:Destroy()
+	end)
+end
+
+function Hud.Flash(color: Color3, strength: number)
+	local flash = UI.make("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 1 - strength,
+		ZIndex = 50,
+		Parent = gui,
+	})
+	local tween = TweenService:Create(flash, TweenInfo.new(0.5), { BackgroundTransparency = 1 })
+	tween:Play()
+	tween.Completed:Once(function()
+		flash:Destroy()
+	end)
+end
+
+function Hud.BigText(text: string, color: Color3, hold: number?)
+	local label = UI.text({
+		Text = text,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.36),
+		Size = UDim2.fromOffset(200, 50),
+		TextColor3 = color,
+		TextStrokeTransparency = 0,
+		TextStrokeColor3 = Color3.new(0, 0, 0),
+		ZIndex = 60,
+		Parent = gui,
+	})
+	TweenService:Create(label, TweenInfo.new(0.35, Enum.EasingStyle.Back), { Size = UDim2.fromOffset(640, 110) }):Play()
+	task.delay(hold or 1.4, function()
+		TweenService:Create(label, TweenInfo.new(0.3), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.wait(0.35)
+		label:Destroy()
+	end)
+end
+
+----------------------------------------------------------------------
+-- Action bar
+----------------------------------------------------------------------
+local function refreshSlots()
+	local data = State.Data
+	local sel = State.Selected
+	for _, slot in slotButtons do
+		local count = 0
+		local label = ""
+		if data then
+			if slot.Kind == "Flask" then
+				count = data.Flasks[slot.Id] or 0
+			elseif slot.Kind == "Draught" then
+				count = data.Draughts[slot.Id] or 0
+			end
+		end
+		if slot.Kind == "Feed" then
+			local feedId = if sel.Kind == "Feed" then sel.Id else nil
+			if feedId and data then
+				count = data.Ingredients[feedId] or 0
+				label = "Feed: " .. Config.Ingredients[feedId].Name
+			else
+				label = "Feed"
+			end
+			slot.Button.Text = label
+			slot.Count.Text = if feedId then "x" .. count else ""
+		else
+			slot.Count.Text = "x" .. count
+		end
+		local selected = sel.Kind == slot.Kind and (slot.Kind == "Feed" or sel.Id == slot.Id)
+		slot.Button.BackgroundTransparency = if count > 0 or slot.Kind == "Feed" then 0 else 0.55
+		local stroke = slot.Button:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = if selected then T.Gold else T.PanelLight
+			stroke.Thickness = if selected then 3 else 2
+		end
+	end
+end
+
+local function showFeedPicker()
+	UI.clear(feedPicker)
+	local data = State.Data
+	local any = false
+	for _, id in Config.IngredientOrder do
+		local count = data and data.Ingredients[id] or 0
+		if count > 0 then
+			any = true
+			local def = Config.Ingredients[id]
+			UI.button({
+				Text = string.format("%s x%d", def.Name, count),
+				Size = UDim2.new(1, 0, 0, 34),
+				BackgroundColor3 = def.Color:Lerp(T.Panel, 0.45),
+			}, function()
+				State.Select("Feed", id)
+				feedPicker.Visible = false
+			end).Parent = feedPicker
+		end
+	end
+	if not any then
+		UI.text({ Text = "No ingredients. Harvest some in the zones!", Size = UDim2.new(1, 0, 0, 30), Font = T.Body }).Parent =
+			feedPicker
+	end
+	feedPicker.Visible = true
+end
+
+local function buildActionBar()
+	local bar = UI.make("Frame", {
+		Name = "ActionBar",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -12),
+		Size = UDim2.fromOffset(0, 74),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = T.Panel,
+		BackgroundTransparency = 0.2,
+		Corner = 12,
+		Parent = gui,
+	})
+	UI.padding(bar, 6)
+	UI.list(bar, 6, true)
+
+	local entries = {}
+	for _, f in Config.Flasks do
+		table.insert(entries, { Kind = "Flask", Id = f.Id, Name = f.Name, Color = f.Color })
+	end
+	for _, d in Config.Draughts do
+		table.insert(entries, { Kind = "Draught", Id = d.Id, Name = d.Name, Color = d.Color })
+	end
+	table.insert(entries, { Kind = "Feed", Id = "", Name = "Feed", Color = Color3.fromRGB(255, 130, 210) })
+
+	for i, entry in entries do
+		local button = UI.button({
+			Text = entry.Name,
+			LayoutOrder = i,
+			Size = UDim2.fromOffset(84, 62),
+			BackgroundColor3 = entry.Color:Lerp(T.Panel, 0.5),
+			Stroke = T.PanelLight,
+			Font = T.Font,
+		}, function()
+			if entry.Kind == "Feed" then
+				showFeedPicker()
+			else
+				feedPicker.Visible = false
+				State.Select(entry.Kind, entry.Id)
+			end
+		end)
+		button.TextScaled = true
+		local keyHint = UI.text({
+			Text = tostring(i),
+			Size = UDim2.fromOffset(16, 16),
+			Position = UDim2.fromOffset(-2, -4),
+			TextColor3 = T.Muted,
+			Parent = button,
+		})
+		keyHint.Visible = UserInputService.KeyboardEnabled
+		local count = UI.text({
+			Text = "",
+			AnchorPoint = Vector2.new(1, 1),
+			Position = UDim2.new(1, 2, 1, 4),
+			Size = UDim2.fromOffset(34, 18),
+			TextColor3 = T.Gold,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			Parent = button,
+		})
+		button.Parent = bar
+		table.insert(slotButtons, { Kind = entry.Kind, Id = entry.Id, Button = button, Count = count })
+	end
+
+	feedPicker = UI.make("ScrollingFrame", {
+		Name = "FeedPicker",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(0.5, 330, 1, -96),
+		Size = UDim2.fromOffset(240, 260),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		BackgroundColor3 = T.Panel,
+		Corner = 10,
+		Visible = false,
+		Parent = gui,
+	})
+	UI.padding(feedPicker, 6)
+	UI.list(feedPicker, 4)
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then
+			return
+		end
+		local index = input.KeyCode.Value - Enum.KeyCode.One.Value + 1
+		if index >= 1 and index <= #entries then
+			local entry = entries[index]
+			if entry.Kind == "Feed" then
+				showFeedPicker()
+			else
+				State.Select(entry.Kind, entry.Id)
+			end
+		end
+	end)
+end
+
+----------------------------------------------------------------------
+-- Top bar
+----------------------------------------------------------------------
+local function buildTopBar()
+	local top = UI.make("Frame", {
+		Position = UDim2.fromOffset(12, 12),
+		Size = UDim2.fromOffset(0, 46),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = T.Panel,
+		BackgroundTransparency = 0.2,
+		Corner = 10,
+		Parent = gui,
+	})
+	UI.padding(top, 6)
+	UI.list(top, 10, true)
+	coinsLabel = UI.text({ Text = "0 coins", Size = UDim2.fromOffset(150, 34), TextColor3 = T.Gold, LayoutOrder = 1, Parent = top })
+	vialsLabel = UI.text({ Text = "0 vials", Size = UDim2.fromOffset(100, 34), TextColor3 = Color3.fromRGB(170, 220, 255), LayoutOrder = 2, Parent = top })
+	luckLabel = UI.text({ Text = "", Size = UDim2.fromOffset(130, 34), TextColor3 = Color3.fromRGB(120, 255, 160), LayoutOrder = 3, Visible = false, Parent = top })
+
+	local menus = UI.make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 12, 0.5, 0),
+		Size = UDim2.fromOffset(120, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Parent = gui,
+	})
+	UI.list(menus, 8)
+	for i, name in { "Journal", "Collection", "Help" } do
+		UI.button({ Text = name, LayoutOrder = i, Size = UDim2.fromOffset(120, 40), BackgroundColor3 = T.PanelLight, Stroke = T.Accent }, function()
+			if Hud.OpenMenu then
+				Hud.OpenMenu(name)
+			end
+		end).Parent = menus
+	end
+end
+
+local function refreshTop()
+	local data = State.Data
+	if not data then
+		return
+	end
+	coinsLabel.Text = UI.formatNumber(data.Coins) .. " coins"
+	vialsLabel.Text = data.Vials .. " vials"
+end
+
+function Hud.Init()
+	gui = UI.screen()
+
+	toastHolder = UI.make("Frame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 12),
+		Size = UDim2.fromOffset(420, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Parent = gui,
+	})
+	UI.list(toastHolder, 6)
+
+	buildTopBar()
+	buildActionBar()
+
+	State.Changed:Connect(function()
+		refreshTop()
+		refreshSlots()
+	end)
+	State.SelectionChanged:Connect(refreshSlots)
+
+	-- Luck boost countdown
+	task.spawn(function()
+		while true do
+			local data = State.Data
+			local left = data and (data.LuckUntil or 0) - os.time() or 0
+			luckLabel.Visible = left > 0
+			if left > 0 then
+				luckLabel.Text = string.format("Luck %d:%02d", left // 60, left % 60)
+			end
+			task.wait(1)
+		end
+	end)
+end
+
+return Hud
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="20">
+          <Properties>
+            <string name="Name">Menus</string>
+            <string name="Source"><![CDATA[-- Pop-up windows: Brew (flasks, draughts, fusion), Shop, Journal,
+-- Collection and Help. Only one is open at a time.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+
+local T = UI.Theme
+
+local Menus = {}
+
+local gui: ScreenGui
+local window: Frame
+local titleLabel: TextLabel
+local body: Frame
+local current: string? = nil
+local renderers: { [string]: (Frame) -> () } = {}
+
+-- Brew window state
+local brewMode = "Flask" -- "Flask" | "Draught" | "Fuse"
+local slots: { string } = {}
+local fuseUid: string? = nil
+local releaseConfirm: string? = nil
+
+local function slotCount(): number
+	return if brewMode == "Draught" then Config.DraughtIngredientCount else Config.FlaskIngredientCount
+end
+
+local function usedCount(id: string): number
+	local n = 0
+	for _, s in slots do
+		if s == id then
+			n += 1
+		end
+	end
+	return n
+end
+
+local function rerender()
+	if current and renderers[current] then
+		UI.clear(body)
+		renderers[current](body)
+	end
+end
+
+function Menus.Open(name: string)
+	if current == name and window.Visible then
+		Menus.Close()
+		return
+	end
+	current = name
+	titleLabel.Text = name
+	window.Visible = true
+	releaseConfirm = nil
+	rerender()
+end
+
+function Menus.Close()
+	current = nil
+	window.Visible = false
+	slots = {}
+	fuseUid = nil
+end
+
+----------------------------------------------------------------------
+-- Shared bits
+----------------------------------------------------------------------
+local function section(parent: Instance, text: string, order: number)
+	return UI.text({
+		Text = text,
+		Size = UDim2.new(1, 0, 0, 26),
+		TextColor3 = T.Muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = order,
+		Parent = parent,
+	})
+end
+
+local function row(parent: Instance, height: number, order: number): Frame
+	local f = UI.make("Frame", {
+		Size = UDim2.new(1, 0, 0, height),
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+		Parent = parent,
+	})
+	local layout = UI.list(f, 6, true)
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	return f
+end
+
+local function grid(parent: Instance, cell: Vector2, order: number): Frame
+	local f = UI.make("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+		Parent = parent,
+	})
+	UI.make("UIGridLayout", {
+		CellSize = UDim2.fromOffset(cell.X, cell.Y),
+		CellPadding = UDim2.fromOffset(6, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = f,
+	})
+	return f
+end
+
+local function card(parent: Instance, height: number, order: number, stroke: Color3?): Frame
+	local f = UI.make("Frame", {
+		Size = UDim2.new(1, 0, 0, height),
+		BackgroundColor3 = T.PanelLight,
+		Corner = 8,
+		LayoutOrder = order,
+		Parent = parent,
+	})
+	if stroke then
+		UI.make("UIStroke", { Color = stroke, Thickness = 2, Parent = f })
+	end
+	UI.padding(f, 8)
+	return f
+end
+
+----------------------------------------------------------------------
+-- Brew
+----------------------------------------------------------------------
+local function ingredientPicker(parent: Instance, order: number)
+	local data = State.Data
+	section(parent, "Your ingredients (tap to add)", order)
+	local g = grid(parent, Vector2.new(150, 44), order + 1)
+	local any = false
+	for i, id in Config.IngredientOrder do
+		local def = Config.Ingredients[id]
+		local owned = data.Ingredients[id] or 0
+		local free = owned - usedCount(id)
+		if owned > 0 then
+			any = true
+			UI.button({
+				Text = string.format("%s  T%d  x%d", def.Name, def.Tier, free),
+				LayoutOrder = i,
+				BackgroundColor3 = def.Color:Lerp(T.Panel, 0.45),
+				BackgroundTransparency = if free > 0 then 0 else 0.6,
+				Font = T.Body,
+			}, function()
+				if free > 0 and #slots < slotCount() then
+					table.insert(slots, id)
+					rerender()
+				end
+			end).Parent = g
+		end
+	end
+	if not any then
+		UI.text({ Text = "Nothing yet. Harvest glowing plants in the zones.", Size = UDim2.new(1, 0, 0, 28), Font = T.Body, LayoutOrder = order + 2, Parent = parent })
+	end
+end
+
+local function slotRow(parent: Instance, order: number)
+	local r = row(parent, 56, order)
+	for i = 1, slotCount() do
+		local id = slots[i]
+		local def = id and Config.Ingredients[id]
+		UI.button({
+			Text = if def then def.Name else "empty",
+			LayoutOrder = i,
+			Size = UDim2.fromOffset(130, 50),
+			BackgroundColor3 = if def then def.Color:Lerp(T.Panel, 0.3) else T.Slot,
+			TextColor3 = if def then T.Text else T.Muted,
+		}, function()
+			if slots[i] then
+				table.remove(slots, i)
+				rerender()
+			end
+		end).Parent = r
+	end
+end
+
+local function renderBrew(parent: Frame)
+	local data = State.Data
+	if not data then
+		return
+	end
+
+	local tabs = row(parent, 40, 1)
+	for i, mode in { "Flask", "Draught", "Fuse" } do
+		UI.button({
+			Text = if mode == "Flask" then "Capture Flask" elseif mode == "Draught" then "Weakening Draught" else "Fuse Guardian",
+			LayoutOrder = i,
+			Size = UDim2.fromOffset(170, 36),
+			BackgroundColor3 = if brewMode == mode then T.Accent else T.Slot,
+		}, function()
+			brewMode = mode
+			slots = {}
+			rerender()
+		end).Parent = tabs
+	end
+
+	local quality = Config.QualityOf(slots, data.PotLevel)
+	local potBonus = data.PotLevel - 1
+
+	if brewMode == "Fuse" then
+		section(parent, "1. Pick a guardian to grow", 2)
+		local list = grid(parent, Vector2.new(190, 44), 3)
+		if #data.Guardians == 0 then
+			UI.text({ Text = "Catch a guardian first!", Size = UDim2.new(1, 0, 0, 28), Font = T.Body, LayoutOrder = 3, Parent = parent })
+		end
+		for i, entry in data.Guardians do
+			local maxed = (entry.Mutation or 0) >= #Config.Mutations
+			UI.button({
+				Text = Config.GuardianDisplayName(entry) .. (if maxed then " (max)" else ""),
+				LayoutOrder = i,
+				BackgroundColor3 = if fuseUid == entry.Uid then T.Accent else T.Slot,
+				Font = T.Body,
+			}, function()
+				if not maxed then
+					fuseUid = entry.Uid
+					rerender()
+				end
+			end).Parent = list
+		end
+
+		local selected = nil
+		for _, entry in data.Guardians do
+			if entry.Uid == fuseUid then
+				selected = entry
+			end
+		end
+		section(parent, "2. Add 3 ingredients (quality decides if it grows)", 4)
+		slotRow(parent, 5)
+		local nextMutation = selected and Config.Mutations[(selected.Mutation or 0) + 1]
+		local info = if not selected
+			then "Select a guardian above."
+			elseif not nextMutation then "Already at its biggest form."
+			else string.format(
+				"Quality %d / %d needed → %s (income x%g)",
+				quality,
+				nextMutation.MinQuality,
+				nextMutation.Prefix,
+				nextMutation.IncomeMult
+			)
+		UI.text({ Text = info, Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 6, Font = T.Body, Parent = parent })
+		local ready = selected and nextMutation and #slots == Config.FlaskIngredientCount and quality >= nextMutation.MinQuality
+		local actions = row(parent, 46, 7)
+		UI.button({
+			Text = "Fuse!",
+			Size = UDim2.fromOffset(160, 42),
+			BackgroundColor3 = if ready then Color3.fromRGB(230, 80, 180) else T.Slot,
+		}, function()
+			if ready then
+				Remotes.Fuse:FireServer(fuseUid, slots)
+				slots = {}
+			end
+		end).Parent = actions
+		ingredientPicker(parent, 8)
+		return
+	end
+
+	local needed = slotCount()
+	local isFlask = brewMode == "Flask"
+	section(
+		parent,
+		string.format("Add %d ingredients. Quality = sum of tiers%s.", needed, if potBonus > 0 then string.format(" +%d cauldron", potBonus) else ""),
+		2
+	)
+	slotRow(parent, 3)
+
+	local result = if isFlask then Config.FlaskForQuality(quality) else Config.DraughtForQuality(quality)
+	local list = if isFlask then Config.Flasks else Config.Draughts
+	local nextTier = nil
+	for _, entry in list do
+		if entry.MinQuality > quality then
+			nextTier = entry
+			break
+		end
+	end
+	local resultText = if isFlask
+		then string.format("Quality %d → %s (catch x%g)", quality, result.Name, result.Mult)
+		else string.format("Quality %d → %s (-%d resistance, slows)", quality, result.Name, result.Power)
+	UI.text({ Text = resultText, Size = UDim2.new(1, 0, 0, 30), TextColor3 = result.Color, LayoutOrder = 4, Parent = parent })
+	if nextTier then
+		UI.text({
+			Text = string.format("Reach quality %d for a %s", nextTier.MinQuality, nextTier.Name),
+			Size = UDim2.new(1, 0, 0, 22),
+			TextColor3 = T.Muted,
+			Font = T.Body,
+			LayoutOrder = 5,
+			Parent = parent,
+		})
+	end
+
+	local actions = row(parent, 46, 6)
+	local ready = #slots == needed and data.Vials > 0
+	UI.button({
+		Text = "Brew!",
+		Size = UDim2.fromOffset(160, 42),
+		BackgroundColor3 = if ready then T.Good else T.Slot,
+	}, function()
+		if ready then
+			Remotes.Brew:FireServer(brewMode, slots)
+			slots = {}
+		end
+	end).Parent = actions
+	UI.text({
+		Text = string.format("Uses 1 vial (you have %d)", data.Vials),
+		Size = UDim2.fromOffset(240, 30),
+		TextColor3 = if data.Vials > 0 then T.Muted else T.Bad,
+		Font = T.Body,
+		Parent = actions,
+	})
+
+	ingredientPicker(parent, 7)
+end
+
+----------------------------------------------------------------------
+-- Shop
+----------------------------------------------------------------------
+local function renderShop(parent: Frame)
+	local data = State.Data
+	if not data then
+		return
+	end
+	section(parent, "Flasks can't be bought. Brew them at your cauldron!", 0)
+	for i, item in Config.Shop do
+		local owned = item.PotLevel and data.PotLevel >= item.PotLevel
+		local locked = item.PotLevel and data.PotLevel < item.PotLevel - 1
+		local c = card(parent, 64, i)
+		UI.text({ Text = item.Name, Size = UDim2.new(0.6, 0, 0, 26), TextXAlignment = Enum.TextXAlignment.Left, Parent = c })
+		UI.text({
+			Text = item.Description,
+			Position = UDim2.fromOffset(0, 26),
+			Size = UDim2.new(0.65, 0, 0, 20),
+			TextColor3 = T.Muted,
+			Font = T.Body,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		local affordable = data.Coins >= item.Price
+		UI.button({
+			Text = if owned then "Owned" elseif locked then "Locked" else UI.formatNumber(item.Price) .. " coins",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(150, 40),
+			BackgroundColor3 = if owned or locked or not affordable then T.Slot else T.Gold:Lerp(T.Panel, 0.2),
+			Parent = c,
+		}, function()
+			if not owned and not locked then
+				Remotes.Buy:FireServer(item.Id)
+			end
+		end)
+	end
+
+	if Config.Monetization.LuckBoostProductId ~= 0 then
+		local c = card(parent, 64, 100, Color3.fromRGB(120, 255, 160))
+		UI.text({
+			Text = string.format("Lucky Brew (%d min)", Config.Monetization.LuckBoostMinutes),
+			Size = UDim2.new(0.6, 0, 0, 26),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		UI.text({
+			Text = string.format("All catch odds x%g while active.", Config.Monetization.LuckBoostMultiplier),
+			Position = UDim2.fromOffset(0, 26),
+			Size = UDim2.new(0.65, 0, 0, 20),
+			TextColor3 = T.Muted,
+			Font = T.Body,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		UI.button({
+			Text = "Robux",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(150, 40),
+			BackgroundColor3 = Color3.fromRGB(60, 170, 90),
+			Parent = c,
+		}, function()
+			Remotes.BuyLuck:FireServer()
+		end)
+	end
+end
+
+----------------------------------------------------------------------
+-- Journal
+----------------------------------------------------------------------
+local function renderJournal(parent: Frame)
+	local data = State.Data
+	if not data then
+		return
+	end
+	local seenCount, caughtCount = 0, 0
+	for _, id in Config.GuardianOrder do
+		local j = data.Journal[id]
+		if j then
+			seenCount += 1
+			if (j.Caught or 0) > 0 then
+				caughtCount += 1
+			end
+		end
+	end
+	section(parent, string.format("Seen %d / %d   Caught %d / %d", seenCount, #Config.GuardianOrder, caughtCount, #Config.GuardianOrder), 0)
+
+	for i, id in Config.GuardianOrder do
+		local def = Config.Guardians[id]
+		local j = data.Journal[id]
+		local rarity = Config.Rarities[def.Rarity]
+		local c = card(parent, if j then 116 else 70, i, if j then rarity.Color else T.Slot)
+		if not j then
+			UI.text({ Text = "???", Size = UDim2.new(1, 0, 0, 28), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = T.Muted, Parent = c })
+			UI.text({
+				Text = "Not seen yet. Somewhere in " .. Config.Zones[def.Zone].Name .. ".",
+				Position = UDim2.fromOffset(0, 30),
+				Size = UDim2.new(1, 0, 0, 20),
+				TextColor3 = T.Muted,
+				Font = T.Body,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = c,
+			})
+			continue
+		end
+		UI.text({
+			Text = string.format("%s   ·   %s %s", def.Name, def.Rarity, def.Element),
+			Size = UDim2.new(1, 0, 0, 26),
+			TextColor3 = rarity.Color,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		local favorite = if j.FavoriteKnown then Config.Ingredients[def.Favorite].Name else "Unknown. Feed it to find out!"
+		local tried = {}
+		for ingredientId in j.Tried or {} do
+			if ingredientId ~= def.Favorite then
+				table.insert(tried, Config.Ingredients[ingredientId] and Config.Ingredients[ingredientId].Name or ingredientId)
+			end
+		end
+		local lines = {
+			string.format("Hint: %s", def.Hint),
+			string.format("Favorite: %s%s", favorite, if #tried > 0 then "   (not: " .. table.concat(tried, ", ") .. ")" else ""),
+			string.format("Zone: %s   Caught: %d   Base catch rate: %d%%   Earns %d/s", Config.Zones[def.Zone].Name, j.Caught or 0, math.floor(def.BaseRate * 100), def.Income),
+		}
+		for k, line in lines do
+			UI.text({
+				Text = line,
+				Position = UDim2.fromOffset(0, 6 + k * 22),
+				Size = UDim2.new(1, 0, 0, 20),
+				TextColor3 = if k == 2 and j.FavoriteKnown then Color3.fromRGB(255, 150, 215) else T.Text,
+				Font = T.Body,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = c,
+			})
+		end
+	end
+end
+
+----------------------------------------------------------------------
+-- Collection
+----------------------------------------------------------------------
+local function renderCollection(parent: Frame)
+	local data = State.Data
+	if not data then
+		return
+	end
+	local total = 0
+	for _, entry in data.Guardians do
+		total += Config.GuardianIncome(entry)
+	end
+	section(
+		parent,
+		string.format("%d guardians · %s coins/s · the best %d live on your plot", #data.Guardians, UI.formatNumber(total), Config.MaxPlotDisplays),
+		0
+	)
+
+	local list = table.clone(data.Guardians)
+	table.sort(list, function(a, b)
+		return Config.GuardianIncome(a) > Config.GuardianIncome(b)
+	end)
+	for i, entry in list do
+		local def = Config.Guardians[entry.Id]
+		if not def then
+			continue
+		end
+		local c = card(parent, 54, i, Config.Rarities[def.Rarity].Color)
+		UI.text({
+			Text = Config.GuardianDisplayName(entry),
+			Size = UDim2.new(0.5, 0, 0, 22),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		UI.text({
+			Text = string.format("%s · %s coins/s", def.Rarity, UI.formatNumber(Config.GuardianIncome(entry))),
+			Position = UDim2.fromOffset(0, 22),
+			Size = UDim2.new(0.5, 0, 0, 18),
+			TextColor3 = T.Muted,
+			Font = T.Body,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = c,
+		})
+		local value = math.floor(Config.GuardianIncome(entry) * Config.ReleaseValueSeconds)
+		local confirming = releaseConfirm == entry.Uid
+		UI.button({
+			Text = if confirming then "Sure? Tap again" else "Release +" .. UI.formatNumber(value),
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(170, 36),
+			BackgroundColor3 = if confirming then T.Bad else T.Slot,
+			Parent = c,
+		}, function()
+			if confirming then
+				releaseConfirm = nil
+				Remotes.Release:FireServer(entry.Uid)
+			else
+				releaseConfirm = entry.Uid
+				rerender()
+			end
+		end)
+	end
+	if #list == 0 then
+		UI.text({ Text = "No guardians yet. Go catch one!", Size = UDim2.new(1, 0, 0, 30), Font = T.Body, LayoutOrder = 1, Parent = parent })
+	end
+end
+
+----------------------------------------------------------------------
+-- Help
+----------------------------------------------------------------------
+local HELP = {
+	"1. Harvest glowing plants in the three zones for ingredients.",
+	"2. At the cauldron on your plot, brew 3 ingredients into a Capture Flask. Better ingredients make a stronger flask. Each brew needs an Empty Vial from the hub shop.",
+	"3. Wear a guardian down before you throw: dodge its red attacks, lure it into hazards (brambles, lava, ice spikes), or hit it with a Weakening Draught.",
+	"4. Every guardian loves one ingredient. Pick Feed on the action bar and tap it. If you guessed right, your odds double and it calms down.",
+	"5. Select a flask and tap the guardian (or press F for the nearest one). Watch the shakes...",
+	"6. Caught guardians live on your plot and earn coins. Collect them at the gold pad, and fuse guardians at your cauldron to grow giant mutated forms.",
+}
+
+local function renderHelp(parent: Frame)
+	for i, line in HELP do
+		UI.text({
+			Text = line,
+			Size = UDim2.new(1, 0, 0, 48),
+			TextWrapped = true,
+			TextScaled = false,
+			TextSize = 18,
+			Font = T.Body,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			LayoutOrder = i,
+			Parent = parent,
+		})
+	end
+end
+
+----------------------------------------------------------------------
+function Menus.Init()
+	gui = UI.screen()
+	window = UI.make("Frame", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.46),
+		Size = UDim2.fromOffset(680, 540),
+		BackgroundColor3 = T.Panel,
+		Corner = 14,
+		Stroke = T.Accent,
+		Visible = false,
+		ZIndex = 10,
+		Parent = gui,
+	})
+	titleLabel = UI.text({ Text = "", Position = UDim2.fromOffset(16, 10), Size = UDim2.new(1, -80, 0, 34), TextXAlignment = Enum.TextXAlignment.Left, Parent = window })
+	UI.button({
+		Text = "X",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 10),
+		Size = UDim2.fromOffset(36, 36),
+		BackgroundColor3 = T.Bad,
+		Parent = window,
+	}, Menus.Close)
+
+	local scroll = UI.make("ScrollingFrame", {
+		Position = UDim2.fromOffset(12, 54),
+		Size = UDim2.new(1, -24, 1, -66),
+		BackgroundTransparency = 1,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		Parent = window,
+	})
+	body = UI.make("Frame", {
+		Size = UDim2.new(1, -10, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Parent = scroll,
+	})
+	local layout = UI.list(body, 8)
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+
+	renderers.Brew = renderBrew
+	renderers.Shop = renderShop
+	renderers.Journal = renderJournal
+	renderers.Collection = renderCollection
+	renderers.Help = renderHelp
+
+	State.Changed:Connect(function()
+		-- Drop slot picks the player can no longer afford.
+		local data = State.Data
+		if data then
+			local counts = {}
+			local kept = {}
+			for _, id in slots do
+				counts[id] = (counts[id] or 0) + 1
+				if counts[id] <= (data.Ingredients[id] or 0) then
+					table.insert(kept, id)
+				end
+			end
+			slots = kept
+		end
+		rerender()
+	end)
+end
+
+return Menus
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="21">
+          <Properties>
+            <string name="Name">State</string>
+            <string name="Source"><![CDATA[-- Client-side copy of the player's data plus the selected action slot.
+
+local State = {}
+
+State.Data = nil :: any
+-- { Kind = "Flask" | "Draught" | "Feed", Id = string }
+State.Selected = { Kind = "Flask", Id = "Clay" }
+
+local changed = Instance.new("BindableEvent")
+local selectionChanged = Instance.new("BindableEvent")
+State.Changed = changed.Event
+State.SelectionChanged = selectionChanged.Event
+
+function State.Set(data)
+	State.Data = data
+	changed:Fire(data)
+end
+
+function State.Select(kind: string, id: string)
+	State.Selected = { Kind = kind, Id = id }
+	selectionChanged:Fire(State.Selected)
+end
+
+-- How many of the selected item the player holds.
+function State.SelectedCount(): number
+	local data = State.Data
+	if not data then
+		return 0
+	end
+	local sel = State.Selected
+	if sel.Kind == "Flask" then
+		return data.Flasks[sel.Id] or 0
+	elseif sel.Kind == "Draught" then
+		return data.Draughts[sel.Id] or 0
+	end
+	return data.Ingredients[sel.Id] or 0
+end
+
+return State
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">Targeting</string>
+            <string name="Source"><![CDATA[-- Tap/click a guardian to use the selected flask, draught or ingredient.
+-- Also draws each guardian's overhead panel with live catch odds.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local CatchMath = require(ReplicatedStorage.Shared.CatchMath)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Hud = require(script.Parent.Hud)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+
+local T = UI.Theme
+local player = Players.LocalPlayer
+
+local Targeting = {}
+
+local guardianFolder: Folder
+local highlight: Highlight
+local panels: { [Model]: { Gui: BillboardGui, Bar: Frame, Status: TextLabel, Odds: TextLabel } } = {}
+
+local function myRoot(): BasePart?
+	local character = player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function guardianFrom(instance: Instance?): Model?
+	while instance and instance ~= guardianFolder do
+		if instance.Parent == guardianFolder and instance:IsA("Model") then
+			return instance
+		end
+		instance = instance.Parent
+	end
+	return nil
+end
+
+local function raycastScreen(position: Vector2): Model?
+	local camera = workspace.CurrentCamera
+	local ray = camera:ScreenPointToRay(position.X, position.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { guardianFolder }
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
+	if result then
+		return guardianFrom(result.Instance)
+	end
+	-- Forgiving fallback for small targets on touch screens: nearest guardian
+	-- whose screen position is close to the tap.
+	local best, bestDist = nil, 70
+	for _, model in guardianFolder:GetChildren() do
+		if model:IsA("Model") then
+			local screenPos, onScreen = camera:WorldToScreenPoint(model:GetPivot().Position)
+			if onScreen then
+				local d = (Vector2.new(screenPos.X, screenPos.Y) - position).Magnitude
+				if d < bestDist then
+					best, bestDist = model, d
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function nearestGuardian(): Model?
+	local root = myRoot()
+	if not root then
+		return nil
+	end
+	local best, bestDist = nil, Config.Catch.ThrowRange
+	for _, model in guardianFolder:GetChildren() do
+		if model:IsA("Model") then
+			local d = (model:GetPivot().Position - root.Position).Magnitude
+			if d < bestDist then
+				best, bestDist = model, d
+			end
+		end
+	end
+	return best
+end
+
+local lastAct = 0
+local function act(model: Model)
+	if os.clock() - lastAct < 0.3 then
+		return
+	end
+	lastAct = os.clock()
+	local root = myRoot()
+	if not root then
+		return
+	end
+	local sel = State.Selected
+	if State.SelectedCount() <= 0 then
+		if sel.Kind == "Feed" then
+			Hud.Toast("Pick an ingredient with the Feed button first.", "error")
+		else
+			Hud.Toast("You're out of that. Brew more at your cauldron!", "error")
+		end
+		return
+	end
+	local distance = (model:GetPivot().Position - root.Position).Magnitude
+	if sel.Kind == "Feed" then
+		Remotes.Feed:FireServer(model, sel.Id)
+	else
+		if distance > Config.Catch.ThrowRange then
+			Hud.Toast("Too far away to throw.", "error")
+			return
+		end
+		Remotes.Throw:FireServer(sel.Kind, sel.Id, model)
+	end
+end
+
+----------------------------------------------------------------------
+-- Overhead panels
+----------------------------------------------------------------------
+local function chanceFor(model: Model, flaskMult: number): number
+	local def = Config.Guardians[model:GetAttribute("GuardianId") :: string]
+	local data = State.Data
+	local luck = if data and (data.LuckUntil or 0) > os.time() then Config.Monetization.LuckBoostMultiplier else 1
+	return CatchMath.Chance({
+		BaseRate = def.BaseRate,
+		FlaskMult = flaskMult,
+		Resistance = (model:GetAttribute("Resistance") :: number?) or 100,
+		FedFavorite = model:GetAttribute("FedFavorite") == true,
+		Stunned = model:GetAttribute("Stunned") == true,
+		Slowed = model:GetAttribute("Slowed") == true,
+		Luck = luck,
+	})
+end
+
+local function addPanel(instance: Instance)
+	if not instance:IsA("Model") or panels[instance :: Model] then
+		return
+	end
+	local model = instance :: Model
+	local id = model:GetAttribute("GuardianId") :: string?
+	local def = id and Config.Guardians[id]
+	if not def then
+		return
+	end
+	local rarity = Config.Rarities[def.Rarity]
+	local gui = UI.make("BillboardGui", {
+		Name = "GuardianPanel",
+		Adornee = model.PrimaryPart,
+		Size = UDim2.fromOffset(200, 84),
+		StudsOffsetWorldSpace = Vector3.new(0, def.Size * 0.9 + 2, 0),
+		MaxDistance = 120,
+		AlwaysOnTop = true,
+		Parent = player:WaitForChild("PlayerGui"),
+	})
+	UI.text({
+		Text = def.Name,
+		Size = UDim2.new(1, 0, 0, 22),
+		TextColor3 = rarity.Color,
+		TextStrokeTransparency = 0.3,
+		Parent = gui,
+	})
+	local barBack = UI.make("Frame", {
+		Position = UDim2.new(0.1, 0, 0, 25),
+		Size = UDim2.new(0.8, 0, 0, 10),
+		BackgroundColor3 = Color3.fromRGB(30, 25, 40),
+		Corner = 5,
+		Parent = gui,
+	})
+	local bar = UI.make("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.fromRGB(255, 110, 90),
+		Corner = 5,
+		Parent = barBack,
+	})
+	local status = UI.text({
+		Text = "",
+		Position = UDim2.fromOffset(0, 38),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextColor3 = T.Text,
+		Font = T.Body,
+		TextStrokeTransparency = 0.4,
+		Parent = gui,
+	})
+	local odds = UI.text({
+		Text = "",
+		Position = UDim2.fromOffset(0, 58),
+		Size = UDim2.new(1, 0, 0, 22),
+		TextColor3 = T.Gold,
+		TextStrokeTransparency = 0.3,
+		Parent = gui,
+	})
+	panels[model] = { Gui = gui, Bar = bar, Status = status, Odds = odds }
+end
+
+local function removePanel(model: Instance)
+	local panel = panels[model :: Model]
+	if panel then
+		panel.Gui:Destroy()
+		panels[model :: Model] = nil
+	end
+end
+
+local function updatePanels()
+	local sel = State.Selected
+	local data = State.Data
+	for model, panel in panels do
+		local resistance = (model:GetAttribute("Resistance") :: number?) or 100
+		panel.Bar.Size = UDim2.fromScale(resistance / 100, 1)
+		panel.Bar.BackgroundColor3 = Color3.fromRGB(110, 220, 120):Lerp(Color3.fromRGB(255, 90, 80), resistance / 100)
+
+		local tags = {}
+		if model:GetAttribute("FedFavorite") then
+			table.insert(tags, "♥ Fed")
+		end
+		if model:GetAttribute("Stunned") then
+			table.insert(tags, "✦ Stunned")
+		elseif model:GetAttribute("Slowed") then
+			table.insert(tags, "Slowed")
+		end
+		if model:GetAttribute("Enraged") then
+			table.insert(tags, "FURIOUS")
+		elseif model:GetAttribute("Calm") then
+			table.insert(tags, "Calm")
+		end
+		panel.Status.Text = if #tags > 0 then table.concat(tags, "  ") else string.format("Resistance %d", resistance)
+
+		local id = model:GetAttribute("GuardianId") :: string
+		if sel.Kind == "Flask" then
+			local flask = Config.GetFlask(sel.Id)
+			if flask then
+				panel.Odds.Text = string.format("%s: %d%%", flask.Name, math.floor(chanceFor(model, flask.Mult) * 100 + 0.5))
+			end
+		elseif sel.Kind == "Feed" then
+			local j = data and data.Journal[id]
+			local def = Config.Guardians[id]
+			panel.Odds.Text = if j and j.FavoriteKnown
+				then "Loves " .. Config.Ingredients[def.Favorite].Name
+				else "Favorite: ???"
+		else
+			panel.Odds.Text = "Weaken it!"
+		end
+	end
+end
+
+----------------------------------------------------------------------
+function Targeting.Init()
+	guardianFolder = workspace:WaitForChild("Guardians") :: Folder
+
+	highlight = Instance.new("Highlight")
+	highlight.FillTransparency = 0.8
+	highlight.OutlineColor = T.Gold
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.Parent = workspace
+
+	guardianFolder.ChildAdded:Connect(function(child)
+		-- Attributes and PrimaryPart may replicate a frame later.
+		task.wait()
+		if child.Parent == guardianFolder then
+			addPanel(child)
+		end
+	end)
+	guardianFolder.ChildRemoved:Connect(removePanel)
+	for _, child in guardianFolder:GetChildren() do
+		addPanel(child)
+	end
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local model = raycastScreen(Vector2.new(input.Position.X, input.Position.Y))
+			if model then
+				act(model)
+			end
+		elseif input.KeyCode == Enum.KeyCode.F or input.KeyCode == Enum.KeyCode.ButtonR2 then
+			local model = nearestGuardian()
+			if model then
+				act(model)
+			else
+				Hud.Toast("No guardian in range.", "error")
+			end
+		end
+	end)
+
+	local accum = 0
+	RunService.RenderStepped:Connect(function(dt)
+		if UserInputService.MouseEnabled then
+			local mouse = UserInputService:GetMouseLocation()
+			local camera = workspace.CurrentCamera
+			local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Include
+			params.FilterDescendantsInstances = { guardianFolder }
+			local result = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
+			highlight.Adornee = if result then guardianFrom(result.Instance) else nil
+		end
+		accum += dt
+		if accum > 0.1 then
+			accum = 0
+			updatePanels()
+		end
+	end)
+end
+
+return Targeting
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">UI</string>
+            <string name="Source"><![CDATA[-- Tiny helpers for building UI in code.
+
+local Players = game:GetService("Players")
+
+local UI = {}
+
+UI.Theme = {
+	Panel = Color3.fromRGB(34, 28, 48),
+	PanelLight = Color3.fromRGB(52, 44, 72),
+	Slot = Color3.fromRGB(64, 54, 88),
+	Accent = Color3.fromRGB(150, 110, 255),
+	Good = Color3.fromRGB(110, 220, 130),
+	Bad = Color3.fromRGB(255, 95, 95),
+	Gold = Color3.fromRGB(255, 205, 80),
+	Text = Color3.fromRGB(245, 240, 255),
+	Muted = Color3.fromRGB(170, 160, 195),
+	Font = Enum.Font.FredokaOne,
+	Body = Enum.Font.GothamMedium,
+}
+
+-- make("Frame", { Size = ..., Parent = ... }, { children })
+function UI.make(className: string, props: { [string]: any }?, children: { Instance }?): any
+	local inst = Instance.new(className)
+	local parent = nil
+	if props then
+		for k, v in props do
+			if k == "Parent" then
+				parent = v
+			elseif k == "Corner" then
+				local c = Instance.new("UICorner")
+				c.CornerRadius = UDim.new(0, v)
+				c.Parent = inst
+			elseif k == "Stroke" then
+				local s = Instance.new("UIStroke")
+				s.Color = v
+				s.Thickness = 2
+				s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				s.Parent = inst
+			else
+				(inst :: any)[k] = v
+			end
+		end
+	end
+	if children then
+		for _, child in children do
+			child.Parent = inst
+		end
+	end
+	if parent then
+		inst.Parent = parent
+	end
+	return inst
+end
+
+function UI.text(props: { [string]: any }): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		Font = UI.Theme.Font,
+		TextColor3 = UI.Theme.Text,
+		TextScaled = true,
+		Size = UDim2.new(1, 0, 0, 24),
+	}
+	for k, v in props do
+		defaults[k] = v
+	end
+	return UI.make("TextLabel", defaults)
+end
+
+function UI.button(props: { [string]: any }, onClick: () -> ()): TextButton
+	local defaults = {
+		BackgroundColor3 = UI.Theme.Accent,
+		Font = UI.Theme.Font,
+		TextColor3 = UI.Theme.Text,
+		TextScaled = true,
+		AutoButtonColor = true,
+		Corner = 8,
+		Size = UDim2.fromOffset(120, 36),
+	}
+	for k, v in props do
+		defaults[k] = v
+	end
+	local b = UI.make("TextButton", defaults)
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 6)
+	pad.PaddingRight = UDim.new(0, 6)
+	pad.PaddingTop = UDim.new(0, 4)
+	pad.PaddingBottom = UDim.new(0, 4)
+	pad.Parent = b
+	b.Activated:Connect(onClick)
+	return b
+end
+
+function UI.list(parent: Instance, padding: number, horizontal: boolean?): UIListLayout
+	return UI.make("UIListLayout", {
+		Padding = UDim.new(0, padding),
+		FillDirection = if horizontal then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Parent = parent,
+	})
+end
+
+function UI.padding(parent: Instance, px: number)
+	UI.make("UIPadding", {
+		PaddingLeft = UDim.new(0, px),
+		PaddingRight = UDim.new(0, px),
+		PaddingTop = UDim.new(0, px),
+		PaddingBottom = UDim.new(0, px),
+		Parent = parent,
+	})
+end
+
+function UI.clear(container: Instance)
+	for _, child in container:GetChildren() do
+		if not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") and not child:IsA("UIPadding") then
+			child:Destroy()
+		end
+	end
+end
+
+local screen: ScreenGui? = nil
+function UI.screen(): ScreenGui
+	if screen then
+		return screen
+	end
+	local gui = UI.make("ScreenGui", {
+		Name = "BrewGuardiansUI",
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = Players.LocalPlayer:WaitForChild("PlayerGui"),
+	})
+	-- Shrink everything on small screens.
+	local scale = UI.make("UIScale", { Parent = gui })
+	local camera = workspace.CurrentCamera
+	local function rescale()
+		local y = camera.ViewportSize.Y
+		scale.Scale = math.clamp(y / 820, 0.55, 1.1)
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
+	rescale()
+	screen = gui
+	return gui
+end
+
+function UI.formatNumber(n: number): string
+	n = math.floor(n)
+	if n >= 1e6 then
+		return string.format("%.1fM", n / 1e6)
+	elseif n >= 1e4 then
+		return string.format("%.1fK", n / 1e3)
+	end
+	return tostring(n)
+end
+
+return UI
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="24">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <float name="Gravity">196.2</float>
+      <bool name="NeedsPivotMigration">false</bool>
+      <bool name="StreamingEnabled">false</bool>
+    </Properties>
+  </Item>
+</roblox>
