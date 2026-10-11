@@ -36,7 +36,8 @@ local function sound(id: string, parent: Instance, speed: number?, volume: numbe
 end
 
 local function newPart(props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.Anchored = true
 	p.CanCollide = false
 	p.CanQuery = false
@@ -253,7 +254,7 @@ local function shatter(flask: Model, color: Color3)
 	end
 	for _ = 1, 10 do
 		local shard = newPart({
-			Shape = Enum.PartType.Wedge,
+			ClassName = "WedgePart",
 			Size = Vector3.new(0.2, math.random() * 0.6 + 0.3, math.random() * 0.6 + 0.3),
 			CFrame = CFrame.new(center) * CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6),
 			Color = color,

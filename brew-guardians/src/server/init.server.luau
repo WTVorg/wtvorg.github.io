@@ -11,11 +11,20 @@ local PlayerData = require(script.PlayerData)
 local Plots = require(script.Plots)
 local WorldBuilder = require(script.WorldBuilder)
 
-WorldBuilder.Build()
-Plots.Start()
-PlayerData.Start()
-Harvest.Start()
-GuardianService.Start()
-Actions.Start()
+-- Each step runs on its own so one failure can't take the whole game down.
+-- Any error still shows in the Output window with its stack trace.
+local function start(name: string, fn: () -> ())
+	local ok, err = xpcall(fn, debug.traceback)
+	if not ok then
+		warn(string.format("[BrewGuardians] %s failed to start:\n%s", name, tostring(err)))
+	end
+end
+
+start("World", WorldBuilder.Build)
+start("Plots", Plots.Start)
+start("PlayerData", PlayerData.Start)
+start("Harvest", Harvest.Start)
+start("Guardians", GuardianService.Start)
+start("Actions", Actions.Start)
 
 print("[BrewGuardians] server ready")

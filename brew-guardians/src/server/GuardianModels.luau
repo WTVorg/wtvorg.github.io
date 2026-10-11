@@ -19,7 +19,8 @@ local function weldTo(root: BasePart, p: BasePart)
 end
 
 local function add(model: Model, root: BasePart, props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Material = Enum.Material.SmoothPlastic
@@ -95,7 +96,7 @@ local function placeholder(id: string): Model
 		elseif def.Element == "Fire" then
 			add(model, root, {
 				Name = "Horn",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(s * 0.12, s * 0.45, s * 0.2),
 				Color = def.Accent,
 				Material = Enum.Material.Neon,
@@ -104,7 +105,7 @@ local function placeholder(id: string): Model
 		else
 			add(model, root, {
 				Name = "Ear",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(s * 0.08, s * 0.4, s * 0.25),
 				Color = def.Accent,
 				Material = Enum.Material.Neon,
@@ -136,7 +137,7 @@ local function placeholder(id: string): Model
 	if def.Behavior == "Charger" then
 		add(model, root, {
 			Name = "Spines",
-			Shape = Enum.PartType.Wedge,
+			ClassName = "WedgePart",
 			Size = Vector3.new(s * 0.15, s * 0.45, s * 0.9),
 			Color = def.Accent,
 			Offset = CFrame.new(0, s * 0.55, s * 0.05),

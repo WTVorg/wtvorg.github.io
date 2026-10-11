@@ -14,8 +14,10 @@ WorldBuilder.ShopPrompt = nil :: ProximityPrompt?
 
 local rng = Random.new(20261011)
 
+-- props.ClassName picks the class (defaults to Part).
 local function part(props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.Anchored = true
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
@@ -159,7 +161,7 @@ local function buildHazard(zoneId: string, zone, position: Vector3, parent: Inst
 			local spikePos = position + Vector3.new(math.cos(a) * d, 1.5, math.sin(a) * d)
 			local spike = part({
 				Name = "Spike",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(1.2, 3, 1.2),
 				CFrame = CFrame.new(spikePos) * CFrame.Angles(0, a, 0),
 				Color = zone.HazardColor,
@@ -382,6 +384,7 @@ end
 function WorldBuilder.Build()
 	local folder = Instance.new("Folder")
 	folder.Name = "World"
+	folder.Parent = workspace
 	WorldBuilder.Folder = folder
 
 	local ground = part({
@@ -401,7 +404,6 @@ function WorldBuilder.Build()
 		buildZone(zoneId, folder)
 	end
 
-	folder.Parent = workspace
 	return folder
 end
 

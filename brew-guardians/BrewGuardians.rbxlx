@@ -517,12 +517,21 @@ local PlayerData = require(script.PlayerData)
 local Plots = require(script.Plots)
 local WorldBuilder = require(script.WorldBuilder)
 
-WorldBuilder.Build()
-Plots.Start()
-PlayerData.Start()
-Harvest.Start()
-GuardianService.Start()
-Actions.Start()
+-- Each step runs on its own so one failure can't take the whole game down.
+-- Any error still shows in the Output window with its stack trace.
+local function start(name: string, fn: () -> ())
+	local ok, err = xpcall(fn, debug.traceback)
+	if not ok then
+		warn(string.format("[BrewGuardians] %s failed to start:\n%s", name, tostring(err)))
+	end
+end
+
+start("World", WorldBuilder.Build)
+start("Plots", Plots.Start)
+start("PlayerData", PlayerData.Start)
+start("Harvest", Harvest.Start)
+start("Guardians", GuardianService.Start)
+start("Actions", Actions.Start)
 
 print("[BrewGuardians] server ready")
 ]]></string>
@@ -1035,7 +1044,8 @@ local function weldTo(root: BasePart, p: BasePart)
 end
 
 local function add(model: Model, root: BasePart, props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Material = Enum.Material.SmoothPlastic
@@ -1111,7 +1121,7 @@ local function placeholder(id: string): Model
 		elseif def.Element == "Fire" then
 			add(model, root, {
 				Name = "Horn",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(s * 0.12, s * 0.45, s * 0.2),
 				Color = def.Accent,
 				Material = Enum.Material.Neon,
@@ -1120,7 +1130,7 @@ local function placeholder(id: string): Model
 		else
 			add(model, root, {
 				Name = "Ear",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(s * 0.08, s * 0.4, s * 0.25),
 				Color = def.Accent,
 				Material = Enum.Material.Neon,
@@ -1152,7 +1162,7 @@ local function placeholder(id: string): Model
 	if def.Behavior == "Charger" then
 		add(model, root, {
 			Name = "Spines",
-			Shape = Enum.PartType.Wedge,
+			ClassName = "WedgePart",
 			Size = Vector3.new(s * 0.15, s * 0.45, s * 0.9),
 			Color = def.Accent,
 			Offset = CFrame.new(0, s * 0.55, s * 0.05),
@@ -2018,7 +2028,7 @@ local RETRIES = 4
 local PlayerData = {}
 
 local store: DataStore? = nil
-local storeOk = pcall(function()
+local storeOk = game.PlaceId ~= 0 and pcall(function()
 	store = DataStoreService:GetDataStore(STORE_NAME)
 end)
 
@@ -2085,7 +2095,7 @@ local function withRetries(fn)
 		lastErr = result
 		-- No point retrying when Studio simply has API access turned off.
 		local message = tostring(result)
-		if message:find("StudioAccessToApisNotAllowed") or message:find("403") then
+		if message:find("StudioAccessToApisNotAllowed") or message:find("403") or message:find("publish") then
 			break
 		end
 		task.wait(attempt)
@@ -2177,7 +2187,7 @@ local function load(player: Player)
 	if not canSave[player] and RunService:IsStudio() then
 		Remotes.Notify:FireClient(
 			player,
-			"Studio: enable API access to DataStores (Game Settings > Security) to keep progress.",
+			"Studio test: progress won't save until you publish and enable API access (Game Settings > Security).",
 			"info"
 		)
 	end
@@ -2619,8 +2629,10 @@ WorldBuilder.ShopPrompt = nil :: ProximityPrompt?
 
 local rng = Random.new(20261011)
 
+-- props.ClassName picks the class (defaults to Part).
 local function part(props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.Anchored = true
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
@@ -2764,7 +2776,7 @@ local function buildHazard(zoneId: string, zone, position: Vector3, parent: Inst
 			local spikePos = position + Vector3.new(math.cos(a) * d, 1.5, math.sin(a) * d)
 			local spike = part({
 				Name = "Spike",
-				Shape = Enum.PartType.Wedge,
+				ClassName = "WedgePart",
 				Size = Vector3.new(1.2, 3, 1.2),
 				CFrame = CFrame.new(spikePos) * CFrame.Angles(0, a, 0),
 				Color = zone.HazardColor,
@@ -2987,6 +2999,7 @@ end
 function WorldBuilder.Build()
 	local folder = Instance.new("Folder")
 	folder.Name = "World"
+	folder.Parent = workspace
 	WorldBuilder.Folder = folder
 
 	local ground = part({
@@ -3006,7 +3019,6 @@ function WorldBuilder.Build()
 		buildZone(zoneId, folder)
 	end
 
-	folder.Parent = workspace
 	return folder
 end
 
@@ -3101,7 +3113,8 @@ local function sound(id: string, parent: Instance, speed: number?, volume: numbe
 end
 
 local function newPart(props): Part
-	local p = Instance.new("Part")
+	local p = Instance.new(props.ClassName or "Part") :: Part
+	props.ClassName = nil
 	p.Anchored = true
 	p.CanCollide = false
 	p.CanQuery = false
@@ -3318,7 +3331,7 @@ local function shatter(flask: Model, color: Color3)
 	end
 	for _ = 1, 10 do
 		local shard = newPart({
-			Shape = Enum.PartType.Wedge,
+			ClassName = "WedgePart",
 			Size = Vector3.new(0.2, math.random() * 0.6 + 0.3, math.random() * 0.6 + 0.3),
 			CFrame = CFrame.new(center) * CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6),
 			Color = color,

@@ -18,7 +18,7 @@ local RETRIES = 4
 local PlayerData = {}
 
 local store: DataStore? = nil
-local storeOk = pcall(function()
+local storeOk = game.PlaceId ~= 0 and pcall(function()
 	store = DataStoreService:GetDataStore(STORE_NAME)
 end)
 
@@ -85,7 +85,7 @@ local function withRetries(fn)
 		lastErr = result
 		-- No point retrying when Studio simply has API access turned off.
 		local message = tostring(result)
-		if message:find("StudioAccessToApisNotAllowed") or message:find("403") then
+		if message:find("StudioAccessToApisNotAllowed") or message:find("403") or message:find("publish") then
 			break
 		end
 		task.wait(attempt)
@@ -177,7 +177,7 @@ local function load(player: Player)
 	if not canSave[player] and RunService:IsStudio() then
 		Remotes.Notify:FireClient(
 			player,
-			"Studio: enable API access to DataStores (Game Settings > Security) to keep progress.",
+			"Studio test: progress won't save until you publish and enable API access (Game Settings > Security).",
 			"info"
 		)
 	end
