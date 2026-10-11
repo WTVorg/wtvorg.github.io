@@ -2,8 +2,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Sounds = require(ReplicatedStorage.Shared.Sounds)
 local CaptureFX = require(script.CaptureFX)
 local Hud = require(script.Hud)
 local Menus = require(script.Menus)
@@ -16,15 +16,20 @@ UI.OnClick = function()
 end
 Hud.Init()
 
-if Config.Sounds.Music ~= "" then
+-- Give imported sounds a moment to replicate before looking for music.
+task.delay(2, function()
+	local id = Sounds.Get("Music")
+	if not id then
+		return
+	end
 	local music = Instance.new("Sound")
 	music.Name = "Music"
-	music.SoundId = Config.Sounds.Music
+	music.SoundId = id
 	music.Looped = true
 	music.Volume = 0.3
 	music.Parent = workspace
 	music:Play()
-end
+end)
 
 Menus.Init()
 CaptureFX.Init()

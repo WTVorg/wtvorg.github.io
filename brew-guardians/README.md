@@ -7,8 +7,22 @@ coins, and can be fused in the pot into giant mutated forms.
 
 ## Open it
 
-**Quickest:** open `BrewGuardians.rbxlx` in Roblox Studio and press Play. The
-map, guardians and UI are all built by script, so no assets need uploading.
+1. Open `BrewGuardians.rbxlx` in Roblox Studio (**File → Open from File**).
+2. **Import the art pack (once).** **File → Import 3D**, pick
+   `art/BrewGuardiansArt.fbx`, keep the default settings and click
+   **Import**. Leave the model wherever it lands; the game finds it, fixes
+   its orientation and scale, and tidies it away when you press Play.
+3. **Import the sounds (once).** Open the **Asset Manager**, click
+   **Bulk Import**, and select every file in `art/sounds/`. When they finish
+   uploading, drag them from the Asset Manager into **SoundService** in the
+   Explorer. The game picks them up by name (`BG_Throw`, `BG_Lock`, ...).
+4. **File → Save**, then press **Play**.
+
+Skipping steps 2 or 3 still works: the game falls back to its part-built
+models and engine sounds (and reminds you in Studio).
+
+Roblox only shows meshes and audio once they're uploaded to your account,
+which is why those two steps can't be done for you inside the file.
 
 **With Rojo (for editing the code in VS Code):**
 
@@ -51,12 +65,17 @@ selected flask, which teaches players that weakening it pays off.
 src/shared/Config.luau      every number: guardians, ingredients, flasks, zones, shop
 src/shared/CatchMath.luau   odds + shake timing (shared so client and server agree)
 src/shared/Remotes.luau     RemoteEvents
+src/shared/Sounds.luau      sound slot -> imported BG_ sound or Config fallback
+src/shared/ArtManifest.luau generated list of art pack assets
 src/server/
+  Art.luau                  finds the imported art pack and makes templates
+  Environment.luau          lighting, sky, clouds, post-processing
+  Landscape.luau            terrain, hills, mountains, volcano, lake, forests
   Build.luau                part helpers: ellipsoids, rings, horns, text signs
   Props.luau                cauldrons, fences, lanterns, trees, gates, stalls, plants
   WorldBuilder.luau         hub, paths, zones, hazards, ingredient nodes, shop stall
   GuardianService.luau      spawning, chase AI, attacks, hazards, resistance
-  GuardianModels.luau       one hand-built body per species / your custom models
+  GuardianModels.luau       your model > art pack mesh > part-built fallback
   Actions.luau              throw, feed, brew, fuse, buy, release, Robux receipt
   Plots.luau                plots, display, income, collector
   PlayerData.luau           DataStore save/load with retries + BindToClose
@@ -86,18 +105,41 @@ it to a Developer Product id. Flasks are never sold for Robux. A purchase that
 gives a random chance at a creature counts as a paid random item under Roblox
 rules, which require you to disclose the odds.
 
+## Art pack
+
+Everything in `art/` is generated from code in `art/tools/` with Blender's
+Python module, so it can be rebuilt or extended:
+
+```sh
+pip install bpy numpy soundfile scipy
+python art/tools/creatures.py -- out/creatures        # 6 guardians
+python art/tools/props.py -- out/props                # cauldron, trees, rocks, chest...
+python art/tools/combine.py -- art/BrewGuardiansArt.fbx src/shared/ArtManifest.luau out/creatures out/props
+python art/tools/sounds.py art/sounds                 # every sound effect + music loop
+```
+
+- Guardians are sculpted from fused, smoothed shapes with baked colour
+  textures; glowing bits (flames, gems, lava) are separate `_Glow` meshes the
+  game renders as Neon in each guardian's accent colour.
+- The pack carries three marker meshes (`ArtOrigin`, `ArtForward`, `ArtUp`),
+  so `src/server/Art.luau` can recover the importer's axes and units exactly.
+- `art/previews/` has renders of every asset and the world.
+
+To replace a guardian with your own model, put a Model named after it in
+`ServerStorage/GuardianModels` (with a PrimaryPart); that wins over the pack.
+
 ## Sounds
 
-`Config.Sounds` has a slot for every sound (throw, shake, catch, break free,
-brew, harvest, coins, UI click, music). The defaults are the few sounds built
-into the engine. To use better ones: in Studio open **Toolbox → Audio**, find
-a sound, right-click → **Copy Asset ID**, and paste it as
-`"rbxassetid://<id>"`. Each slot's comment suggests a search term. Empty `""`
-means silence.
+`art/sounds/` holds synthesised effects (throw, shake, catch, break free,
+brew, harvest, coins, UI click) and a music loop. Any Sound named
+`BG_<Slot>` in SoundService overrides the matching slot in `Config.Sounds`,
+so swapping one is just importing a new file with the same name.
 
-## Art
+## World
 
-Everything is built from parts in code (smooth stretched spheres for bodies),
-so the place works with nothing uploaded. For a front-page look, model the
-guardians in Blender or grab meshes from the Creator Store and drop them in
-`ServerStorage/GuardianModels`; the code uses them automatically.
+The ground is Roblox Terrain (swaying grass, snow, glacier ice, glowing
+cracked lava, water) with hills, a mountain ring, a volcano behind Ember
+Caldera, a lake, and forests between the areas (`src/server/Landscape.luau`).
+Lighting uses Future lighting, atmosphere, clouds, bloom and colour grading
+(`src/server/Environment.luau`). The play areas stay flat because guardians
+walk on a flat plane.

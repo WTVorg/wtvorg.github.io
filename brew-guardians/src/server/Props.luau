@@ -2,6 +2,7 @@
 -- gates, stalls, pedestals and ingredient plants. Every builder takes a
 -- ground CFrame (y = floor level, facing -Z) and returns a Model.
 
+local Art = require(script.Parent.Art)
 local Build = require(script.Parent.Build)
 
 local Props = {}
@@ -22,7 +23,46 @@ end
 -- Cauldron: round iron belly, rim, glowing brew, legs and a fire below.
 -- Returns model, brewPart (for colour changes / effects), promptPart.
 ----------------------------------------------------------------------
+-- Brew surface, bubbles and glow shared by the mesh and part cauldrons.
+local function brewSurface(m: Model, at: CFrame, diameter: number, r: number, brewColor: Color3): BasePart
+	local brew = Build.cylinder(m, at, 0.1, diameter, brewColor, Enum.Material.Neon, { CanCollide = false })
+	brew.Name = "Brew"
+	for i = 1, 4 do
+		local a = jitter(0, math.pi * 2)
+		local d = jitter(0.1, 0.4) * diameter / 2
+		local s = jitter(0.12, 0.24) * r
+		Build.ellipsoid(m, at * CFrame.new(math.cos(a) * d, 0.08, math.sin(a) * d), Vector3.new(s, s * 0.7, s), brewColor:Lerp(Color3.new(1, 1, 1), 0.35), Enum.Material.Neon, { CanCollide = false })
+	end
+	Build.light(brew, brewColor, r * 5, 1.2)
+	local bubbles = Build.sparkles(brew, brewColor:Lerp(Color3.new(1, 1, 1), 0.4), 8, r * 0.18)
+	bubbles.Name = "Bubbles"
+	bubbles.EmissionDirection = Enum.NormalId.Right -- cylinder's top face
+	bubbles.Speed = NumberRange.new(r * 0.6, r * 1.2)
+	bubbles.SpreadAngle = Vector2.new(25, 25)
+	return brew
+end
+
 function Props.Cauldron(parent: Instance, ground: CFrame, r: number, brewColor: Color3): (Model, BasePart, BasePart)
+	local mesh = Art.SpawnScaled("Cauldron", ground, r, parent)
+	if mesh then
+		mesh.Name = "Cauldron"
+		local body = mesh:FindFirstChild("Mesh") :: BasePart
+		body.CanCollide = true
+		local ember = mesh:FindFirstChild("Glow") :: BasePart?
+		if ember then
+			local fire = Instance.new("Fire")
+			fire.Size = r * 1.6
+			fire.Heat = 6
+			fire.Color = Color3.fromRGB(255, 140, 40)
+			fire.SecondaryColor = Color3.fromRGB(255, 220, 90)
+			fire.Parent = ember
+			Build.light(ember, Color3.fromRGB(255, 150, 60), r * 4, 1.5)
+		end
+		-- inner wall is ~0.81 units wide at the brew line, 1.24 units up
+		local brew = brewSurface(mesh, ground * CFrame.new(0, r * 1.24, 0), r * 1.6, r, brewColor)
+		return mesh, brew, body
+	end
+
 	local m = Build.model("Cauldron", parent)
 	local lift = r * 0.55 -- room for the fire underneath
 	local c = ground * CFrame.new(0, lift + r * 0.7, 0)
@@ -143,9 +183,15 @@ end
 ----------------------------------------------------------------------
 -- Nature
 ----------------------------------------------------------------------
+local TREE_ART = { Round = "TreeRound", Pine = "TreePine", SnowPine = "TreeSnow", Dead = "TreeDead" }
+
 function Props.Tree(parent: Instance, ground: CFrame, style: string)
-	local m = Build.model("Tree", parent)
 	local h = jitter(10, 16)
+	local art = Art.Spawn(TREE_ART[style] or "TreeRound", ground * CFrame.Angles(0, jitter(0, math.pi * 2), 0), h * (if style == "Dead" then 0.8 else 1.15), parent)
+	if art then
+		return art
+	end
+	local m = Build.model("Tree", parent)
 	if style == "Pine" or style == "SnowPine" then
 		Build.cylinder(m, ground * CFrame.new(0, h * 0.35, 0), h * 0.7, 1.4, WOOD_DARK, Enum.Material.Wood)
 		local green = if style == "SnowPine" then Color3.fromRGB(70, 110, 95) else Color3.fromRGB(52, 120, 70)
@@ -177,8 +223,19 @@ function Props.Tree(parent: Instance, ground: CFrame, style: string)
 end
 
 function Props.Rocks(parent: Instance, ground: CFrame, size: number, color: Color3?, material: Enum.Material?)
-	local m = Build.model("Rocks", parent)
 	local col = color or STONE
+	local _, _, value = col:ToHSV()
+	local artName = if value < 0.32 then "RockDark" elseif value > 0.78 then "RockSnow" else "RockGrey"
+	local art = Art.Spawn(artName, ground * CFrame.Angles(0, jitter(0, math.pi * 2), 0), size * 0.95, parent)
+	if art then
+		for _, d in art:GetDescendants() do
+			if d:IsA("BasePart") and d.Name == "Mesh" then
+				d.CanCollide = true
+			end
+		end
+		return art
+	end
+	local m = Build.model("Rocks", parent)
 	for i = 1, 3 do
 		local s = size * (1 - i * 0.22)
 		local off = if i == 1 then Vector3.zero else Vector3.new(jitter(-1, 1), 0, jitter(-1, 1)).Unit * size * 0.55
@@ -188,6 +245,20 @@ function Props.Rocks(parent: Instance, ground: CFrame, size: number, color: Colo
 end
 
 function Props.Crystals(parent: Instance, ground: CFrame, size: number, color: Color3, glow: boolean?)
+	local art = Art.Spawn("Crystals", ground * CFrame.Angles(0, jitter(0, math.pi * 2), 0), size * 1.5, parent)
+	if art then
+		if glow then
+			for _, d in art:GetDescendants() do
+				if d:IsA("MeshPart") then
+					d.TextureID = ""
+					d.Material = Enum.Material.Neon
+					d.Color = color
+				end
+			end
+			Build.light(art:FindFirstChildWhichIsA("BasePart") :: BasePart, color, size * 4, 1)
+		end
+		return art
+	end
 	local m = Build.model("Crystals", parent)
 	for i = 1, 5 do
 		local h = size * jitter(0.6, 1.3) * (if i == 1 then 1.4 else 1)
@@ -197,6 +268,20 @@ function Props.Crystals(parent: Instance, ground: CFrame, size: number, color: C
 		local mat = if glow and i == 1 then Enum.Material.Neon else Enum.Material.Glass
 		Build.part(m, base * CFrame.new(0, h / 2, 0), Vector3.new(w, h, w), color, mat, { Transparency = if mat == Enum.Material.Glass then 0.15 else 0 })
 		Build.tent(m, base * CFrame.new(0, h, 0), w * 1.2, w, color, mat)
+	end
+	return m
+end
+
+function Props.Bush(parent: Instance, ground: CFrame, size: number)
+	local art = Art.Spawn("Bush", ground * CFrame.Angles(0, jitter(0, math.pi * 2), 0), size, parent)
+	if art then
+		return art
+	end
+	local m = Build.model("Bush", parent)
+	for i = 1, 5 do
+		local a = i / 5 * math.pi * 2
+		local d = if i == 1 then 0 else size * 0.45
+		Build.ellipsoid(m, ground * CFrame.new(math.cos(a) * d, size * 0.45, math.sin(a) * d), Vector3.new(size, size * 0.8, size), Color3.fromRGB(80, 160, 75):Lerp(Color3.fromRGB(60, 130, 60), i / 5), Enum.Material.Grass)
 	end
 	return m
 end
@@ -281,8 +366,14 @@ end
 
 -- Treasure chest overflowing with coins. Returns model, the lid part.
 function Props.CoinChest(parent: Instance, ground: CFrame): (Model, BasePart)
-	local m = Build.model("CoinChest", parent)
 	local gold = Color3.fromRGB(255, 200, 60)
+	local art = Art.Spawn("CoinChest", ground, 4.2, parent)
+	if art then
+		local pad = Build.cylinder(art, ground * CFrame.new(0, 0.2, 0), 0.4, 9, Color3.fromRGB(200, 150, 40), Enum.Material.Neon, { CanCollide = false })
+		Build.light(pad, gold, 12, 1)
+		return art, art:FindFirstChild("Mesh") :: BasePart
+	end
+	local m = Build.model("CoinChest", parent)
 	Build.cylinder(m, ground * CFrame.new(0, 0.2, 0), 0.4, 9, Color3.fromRGB(200, 150, 40), Enum.Material.Neon, { CanCollide = false })
 	local box = Build.part(m, ground * CFrame.new(0, 1.6, 0), Vector3.new(5, 2.8, 3.4), WOOD, Enum.Material.WoodPlanks)
 	for _, x in { -2.2, 2.2 } do

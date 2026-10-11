@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Build = require(script.Parent.Build)
+local Landscape = require(script.Parent.Landscape)
 local Props = require(script.Parent.Props)
 
 local WorldBuilder = {}
@@ -18,10 +19,8 @@ WorldBuilder.PublicBrewPrompt = nil :: ProximityPrompt?
 
 local rng = Random.new(20261011)
 
-local GRASS = Color3.fromRGB(116, 178, 92)
 local COBBLE = Color3.fromRGB(196, 186, 168)
 local COBBLE_DARK = Color3.fromRGB(160, 150, 136)
-local PATH = Color3.fromRGB(205, 180, 135)
 
 -- Generic part helper kept for the telegraph effects in GuardianService.
 -- props.ClassName picks the class (defaults to Part).
@@ -151,6 +150,7 @@ local function buildHazard(zoneId: string, zone, position: Vector3, parent: Inst
 		end
 	end
 
+	Landscape.Hazard(zoneId, position, r)
 	base.Name = "HazardBase"
 	base:SetAttribute("Hazard", true)
 	base:SetAttribute("Zone", zoneId)
@@ -185,8 +185,7 @@ local function buildZone(zoneId: string, folder: Folder)
 	zoneFolder.Parent = folder
 
 	local inward = (Vector3.zero - center).Unit
-	Build.cylinder(zoneFolder, CFrame.new(center + Vector3.new(0, 0.1, 0)), 0.3, (zone.Radius + 12) * 2, zone.Floor, style.Floor)
-	Build.cylinder(zoneFolder, CFrame.new(center + Vector3.new(0, 0.05, 0)), 0.3, (zone.Radius + 18) * 2, zone.Floor:Lerp(GRASS, 0.5), style.Floor)
+	Landscape.Zone(zoneId)
 
 	-- Gate where the path arrives
 	local gatePos = center + inward * (zone.Radius + 10)
@@ -232,13 +231,6 @@ local function buildZone(zoneId: string, folder: Folder)
 		end
 	end
 
-	-- Floor colour variation
-	for _ = 1, 14 do
-		local pos = scatter(center, zone.Radius - 10, {}, 0)
-		local sz = rng:NextNumber(18, 40)
-		Build.ellipsoid(zoneFolder, CFrame.new(pos + Vector3.new(0, 0.26, 0)) * CFrame.Angles(0, rng:NextNumber(0, 6), 0), Vector3.new(sz, 0.08, sz * 0.7), zone.Floor:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0.05, 0.15)), style.Floor, { CanCollide = false })
-	end
-
 	-- Inner scenery, kept clear of hazards, plants and each other
 	local decor = Instance.new("Folder")
 	decor.Name = "Decor"
@@ -262,14 +254,7 @@ local function buildZone(zoneId: string, folder: Folder)
 			end
 		elseif zoneId == "Caldera" then
 			if roll == 0 then
-				-- tapering basalt spire with a glowing seam
-				local h = rng:NextNumber(5, 9)
-				local tilt = CFrame.Angles(rng:NextNumber(-0.15, 0.15), rng:NextNumber(0, 6), rng:NextNumber(-0.15, 0.15))
-				for k = 0, 2 do
-					local w = 5 - k * 1.4
-					Build.part(decor, ground * tilt * CFrame.new(0, h * k * 0.8 + h * 0.45, 0) * CFrame.Angles(0, k * 0.5, 0), Vector3.new(w, h, w), Color3.fromRGB(48, 40, 40), Enum.Material.Basalt)
-				end
-				Build.part(decor, ground * tilt * CFrame.new(0, h * 0.9, 0), Vector3.new(5.2, 0.3, 5.2), Color3.fromRGB(255, 110, 30), Enum.Material.Neon)
+				Props.Rocks(decor, ground, rng:NextNumber(7, 11), Color3.fromRGB(46, 38, 36))
 			elseif roll == 1 then
 				-- glowing crack in the ground
 				Build.part(decor, ground * CFrame.new(0, 0.28, 0), Vector3.new(1, 0.1, rng:NextNumber(12, 22)), Color3.fromRGB(255, 120, 40), Enum.Material.Neon, { CanCollide = false })
@@ -300,7 +285,7 @@ local function buildPath(from: Vector3, to: Vector3, width: number, folder: Inst
 	local length = dir.Magnitude
 	local mid = (from + to) / 2
 	local cf = CFrame.lookAt(mid, mid + dir.Unit)
-	Build.part(folder, cf * CFrame.new(0, 0.12, 0), Vector3.new(width, 0.25, length), PATH, Enum.Material.Pebble)
+	Landscape.Path(from, to, width)
 	-- edge stones
 	local count = math.floor(length / 7)
 	for i = 0, count do
@@ -320,16 +305,13 @@ local function buildHub(folder: Folder)
 	hub.Parent = folder
 	local R = Config.HubRadius
 
-	-- Plaza rings
-	Build.cylinder(hub, CFrame.new(0, 0.15, 0), 0.3, R * 2, COBBLE, Enum.Material.Cobblestone)
+	-- Plaza: textured terrain cobbles with a stone kerb and a glowing ring
+	Landscape.Plaza(R)
 	Build.ring(hub, CFrame.new(0, 0.3, 0), R - 1, 1.2, 64, COBBLE_DARK, Enum.Material.Slate)
-	Build.cylinder(hub, CFrame.new(0, 0.2, 0), 0.3, 64, COBBLE_DARK, Enum.Material.Cobblestone)
-	Build.ring(hub, CFrame.new(0, 0.35, 0), 32, 0.8, 48, Color3.fromRGB(150, 110, 230), Enum.Material.Neon)
+	Build.ring(hub, CFrame.new(0, 0.12, 0), 34, 0.8, 48, Color3.fromRGB(150, 110, 230), Enum.Material.Neon)
 
 	for i = 0, 7 do
 		local a = i * 45
-		local mid = polar(a, (R + 32) / 2)
-		Build.part(hub, CFrame.lookAt(mid + Vector3.new(0, 0.32, 0), Vector3.new(0, 0.32, 0)), Vector3.new(6, 0.05, R - 32), COBBLE_DARK, Enum.Material.Slate)
 		-- planter with a tree between the stripes
 		local planter = polar(a + 22.5, 70)
 		Build.cylinder(hub, CFrame.new(planter + Vector3.new(0, 0.8, 0)), 1.6, 8, COBBLE_DARK, Enum.Material.Slate)
@@ -362,6 +344,9 @@ local function buildHub(folder: Folder)
 	local stallPos = polar(210, 62) + Vector3.new(0, 0.3, 0)
 	local _, counter = Props.Stall(hub, facing(stallPos, Vector3.zero), Color3.fromRGB(230, 80, 100), Color3.fromRGB(255, 240, 230))
 	WorldBuilder.ShopPrompt = prompt(counter, "Shop", "Vials & Cauldrons", 12)
+	-- two more stalls so the plaza reads as a market
+	Props.Stall(hub, facing(polar(90, 64) + Vector3.new(0, 0.3, 0), Vector3.zero), Color3.fromRGB(80, 150, 230), Color3.fromRGB(240, 245, 255))
+	Props.Stall(hub, facing(polar(330, 64) + Vector3.new(0, 0.3, 0), Vector3.zero), Color3.fromRGB(110, 190, 90), Color3.fromRGB(255, 240, 200))
 	Props.SignBoard(hub, facing(stallPos, Vector3.zero) * CFrame.new(11, 0, -2), "SHOP", 8, Color3.fromRGB(150, 60, 80))
 
 	-- Spawn
@@ -383,27 +368,7 @@ function WorldBuilder.Build()
 	folder.Parent = workspace
 	WorldBuilder.Folder = folder
 
-	local ground = Build.part(folder, CFrame.new(0, -2, 0), Vector3.new(2048, 4, 2048), GRASS, Enum.Material.Grass)
-	ground.Name = "Ground"
-	ground.Locked = true
-
-	-- Soft colour patches and tufts so the grass isn't one flat colour
-	for _ = 1, 40 do
-		local p = Vector3.new(rng:NextNumber(-650, 650), 0.02, rng:NextNumber(-650, 650))
-		if p.Magnitude > Config.HubRadius + 10 then
-			local s = rng:NextNumber(30, 90)
-			Build.ellipsoid(folder, CFrame.new(p) * CFrame.Angles(0, rng:NextNumber(0, 6), 0), Vector3.new(s, 0.1, s * 0.7), GRASS:Lerp(Color3.fromRGB(80, 140, 70), rng:NextNumber(0.2, 0.6)), Enum.Material.Grass, { CanCollide = false })
-		end
-	end
-	local tufts = Instance.new("Folder")
-	tufts.Name = "Tufts"
-	tufts.Parent = folder
-	for _ = 1, 160 do
-		local p = Vector3.new(rng:NextNumber(-600, 600), 0, rng:NextNumber(-600, 600))
-		if p.Magnitude > Config.HubRadius + 5 then
-			Props.GrassTuft(tufts, CFrame.new(p), GRASS:Lerp(Color3.fromRGB(60, 120, 50), rng:NextNumber(0, 0.5)))
-		end
-	end
+	Landscape.Base()
 
 	buildHub(folder)
 
@@ -423,6 +388,8 @@ function WorldBuilder.Build()
 		local dir = center.Unit
 		buildPath(dir * (Config.HubRadius - 2), dir * (Config.PlotRadius - Config.PlotSize / 2), 10, paths)
 	end
+
+	Landscape.Scenery(folder)
 
 	return folder
 end

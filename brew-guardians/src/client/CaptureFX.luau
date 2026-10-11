@@ -12,6 +12,7 @@ local TweenService = game:GetService("TweenService")
 local CatchMath = require(ReplicatedStorage.Shared.CatchMath)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Sounds = require(ReplicatedStorage.Shared.Sounds)
 local Hud = require(script.Parent.Hud)
 local UI = require(script.Parent.UI)
 
@@ -24,7 +25,11 @@ local fxFolder: Folder
 ----------------------------------------------------------------------
 -- Helpers
 ----------------------------------------------------------------------
-local function sound(id: string, parent: Instance, speed: number?, volume: number?)
+local function sound(slot: string, parent: Instance, speed: number?, volume: number?)
+	local id = Sounds.Get(slot)
+	if not id then
+		return
+	end
 	local s = Instance.new("Sound")
 	s.SoundId = id
 	s.PlaybackSpeed = speed or 1
@@ -173,7 +178,7 @@ local function onThrowVisual(from: Vector3, target: Instance?, color: Color3, fl
 	end
 	local model = target :: Model
 	local flask = buildFlask(color, 0.6)
-	sound(Config.Sounds.Throw, flask.PrimaryPart :: BasePart, 1.1, 0.6)
+	sound("Throw", flask.PrimaryPart :: BasePart, 1.1, 0.6)
 	local trail = Instance.new("Trail")
 	local a0 = Instance.new("Attachment")
 	a0.Position = Vector3.new(0, 0.4, 0)
@@ -326,13 +331,13 @@ local function onCaptureSequence(info)
 	for i = 1, CatchMath.Shakes do
 		local amplitude = math.rad(14 + i * 9)
 		local pitch = 0.9 + i * 0.18
-		sound(Config.Sounds.Shake, body, pitch, 0.6 + i * 0.15)
+		sound("Shake", body, pitch, 0.6 + i * 0.15)
 		if i > shakes then
 			-- Breaking free: a violent half-wobble, then glass everywhere.
 			wobble(flask, ground, scale, amplitude * 1.6, CatchMath.ShakeInterval * 0.35)
 			local nearMiss = i == CatchMath.Shakes
 			dots[i].BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-			sound(Config.Sounds.Burst, body, 0.8, 1)
+			sound("Burst", body, 0.8, 1)
 			ring(ground + Vector3.new(0, 0.5, 0), Color3.fromRGB(255, 80, 60), 18)
 			shatter(flask, color)
 			local burstAnchor = newPart({ Transparency = 1, Size = Vector3.one, CFrame = CFrame.new(ground + Vector3.new(0, 2, 0)) })
@@ -363,7 +368,7 @@ local function onCaptureSequence(info)
 	end
 
 	-- 3) Click. Locked.
-	sound(Config.Sounds.Lock, body, 1.2, 1)
+	sound("Lock", body, 1.2, 1)
 	for _, d in dots do
 		d.BackgroundColor3 = Color3.fromRGB(120, 255, 140)
 	end

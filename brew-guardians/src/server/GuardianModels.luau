@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Art = require(script.Parent.Art)
 local Build = require(script.Parent.Build)
 
 local GuardianModels = {}
@@ -256,6 +257,12 @@ local function buildBuiltIn(id: string): Model
 		kit.e(kit.P(0, 0.45, 0), 0.25, 0.25, 0.25, def.Accent, Enum.Material.Neon, "Accent")
 	end
 
+	return model
+end
+
+-- Glow, sparkles and welds shared by the mesh and part-built bodies.
+local function finishBody(model: Model, root: BasePart, def)
+	local s = def.Size
 	local light = Instance.new("PointLight")
 	light.Color = def.Accent
 	light.Range = s * 2
@@ -280,6 +287,26 @@ local function buildBuiltIn(id: string): Model
 			weld.Parent = d
 		end
 	end
+end
+
+-- The imported Blender mesh, when the art pack is in the place.
+local function buildFromArt(id: string): Model?
+	local def = Config.Guardians[id]
+	local s = def.Size
+	if not Art.Has(id) then
+		return nil
+	end
+	local model = Art.SpawnScaled(id, CFrame.new(), s) :: Model -- 1 Blender unit = Size studs
+	Art.SetGlow(model, def.Accent)
+	local root = Instance.new("Part")
+	root.Name = "Root"
+	root.Size = Vector3.new(s * 0.8, s * 0.8, s * 0.8)
+	root.Transparency = 1
+	root.CanCollide = false
+	root.Anchored = true
+	root.CFrame = CFrame.new(0, s / 2, 0)
+	root.Parent = model
+	model.PrimaryPart = root
 	return model
 end
 
@@ -298,18 +325,19 @@ function GuardianModels.Build(id: string, mutation: number?): Model
 			end
 		end
 	else
-		model = buildBuiltIn(id)
+		model = buildFromArt(id) or buildBuiltIn(id)
+		finishBody(model, model.PrimaryPart :: BasePart, Config.Guardians[id])
 	end
 	model.Name = id
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 
 	local m = Config.Mutations[mutation or 0]
 	if m then
-		model:ScaleTo(m.Scale)
+		model:ScaleTo(model:GetScale() * m.Scale)
 		-- Mutated forms get a shifted, glowing accent colour.
 		local tint = ({ Color3.fromRGB(255, 120, 220), Color3.fromRGB(150, 90, 255), Color3.fromRGB(255, 60, 90) })[mutation :: number]
 		for _, d in model:GetDescendants() do
-			if d:IsA("BasePart") and d.Name == "Accent" then
+			if d:IsA("BasePart") and (d.Name == "Accent" or d.Name == "Glow") then
 				d.Color = tint
 				d.Material = Enum.Material.Neon
 			end

@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Sounds = require(ReplicatedStorage.Shared.Sounds)
 local State = require(script.Parent.State)
 local UI = require(script.Parent.UI)
 
@@ -42,8 +43,8 @@ local KIND_COLORS = {
 local KIND_SOUNDS = { item = "Harvest", coins = "Coins", brew = "Brew" }
 
 local function playSound(slot: string)
-	local id = Config.Sounds[slot]
-	if not id or id == "" then
+	local id = Sounds.Get(slot)
+	if not id then
 		return
 	end
 	local s = Instance.new("Sound")
